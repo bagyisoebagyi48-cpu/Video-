@@ -135,8 +135,8 @@ fun WelcomeScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     var isSigningIn by remember { mutableStateOf(false) }
-    var pickerTarget by rememberSaveable { mutableStateOf(CountryPickerTarget.NONE) }
-    var legalSheet by rememberSaveable { mutableStateOf(LegalSheetType.NONE) }
+    var pickerTarget by remember { mutableStateOf(CountryPickerTarget.NONE) }
+    var legalSheet by remember { mutableStateOf(LegalSheetType.NONE) }
     var countrySearchQuery by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(toastMessage) {

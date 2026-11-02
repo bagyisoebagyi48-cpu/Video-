@@ -79,6 +79,17 @@ tasks.withType<Test> {
   }
 }
 
+tasks.matching { it.name == "packageDebug" || it.name == "assembleDebug" }.configureEach {
+  doLast {
+    val builtApk = file("${layout.buildDirectory.get().asFile}/outputs/apk/debug/app-debug.apk")
+    val targetApk = file("${rootDir}/.build-outputs/app-debug.apk")
+    if (builtApk.exists()) {
+      targetApk.parentFile?.mkdirs()
+      builtApk.copyTo(targetApk, overwrite = true)
+    }
+  }
+}
+
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
 secrets {

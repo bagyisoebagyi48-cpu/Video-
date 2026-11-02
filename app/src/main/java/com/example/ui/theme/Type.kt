@@ -4,20 +4,70 @@ import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontLoadingStrategy
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.example.R
 
 val OutfitFontFamily = FontFamily(
-    Font(R.font.outfit, FontWeight.Normal),
-    Font(R.font.outfit, FontWeight.Bold)
+    Font(
+        resId = R.font.outfit,
+        weight = FontWeight.Normal,
+        style = FontStyle.Normal,
+        loadingStrategy = FontLoadingStrategy.OptionalLocal
+    ),
+    Font(
+        resId = R.font.outfit,
+        weight = FontWeight.Medium,
+        style = FontStyle.Normal,
+        loadingStrategy = FontLoadingStrategy.OptionalLocal
+    ),
+    Font(
+        resId = R.font.outfit,
+        weight = FontWeight.SemiBold,
+        style = FontStyle.Normal,
+        loadingStrategy = FontLoadingStrategy.OptionalLocal
+    ),
+    Font(
+        resId = R.font.outfit,
+        weight = FontWeight.Bold,
+        style = FontStyle.Normal,
+        loadingStrategy = FontLoadingStrategy.OptionalLocal
+    ),
+    Font(
+        resId = R.font.outfit,
+        weight = FontWeight.Bold,
+        style = FontStyle.Italic,
+        loadingStrategy = FontLoadingStrategy.OptionalLocal
+    )
 )
 
 val PlusJakartaFontFamily = FontFamily(
-    Font(R.font.plus_jakarta_sans, FontWeight.Normal),
-    Font(R.font.plus_jakarta_sans, FontWeight.Medium),
-    Font(R.font.plus_jakarta_sans, FontWeight.SemiBold),
-    Font(R.font.plus_jakarta_sans, FontWeight.Bold)
+    Font(
+        resId = R.font.plus_jakarta_sans,
+        weight = FontWeight.Normal,
+        style = FontStyle.Normal,
+        loadingStrategy = FontLoadingStrategy.OptionalLocal
+    ),
+    Font(
+        resId = R.font.plus_jakarta_sans,
+        weight = FontWeight.Medium,
+        style = FontStyle.Normal,
+        loadingStrategy = FontLoadingStrategy.OptionalLocal
+    ),
+    Font(
+        resId = R.font.plus_jakarta_sans,
+        weight = FontWeight.SemiBold,
+        style = FontStyle.Normal,
+        loadingStrategy = FontLoadingStrategy.OptionalLocal
+    ),
+    Font(
+        resId = R.font.plus_jakarta_sans,
+        weight = FontWeight.Bold,
+        style = FontStyle.Normal,
+        loadingStrategy = FontLoadingStrategy.OptionalLocal
+    )
 )
 
 val Typography = Typography(

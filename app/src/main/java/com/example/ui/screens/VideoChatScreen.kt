@@ -72,6 +72,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -172,13 +173,16 @@ fun VideoChatScreen(
         }
     }
 
+    val latestIsMicMuted by rememberUpdatedState(uiState.isMicMuted)
+    val latestOnToggleMute by rememberUpdatedState(onToggleMute)
+
     // Safe lifecycle handling when app goes to background
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
                 // Mute audio when backgrounded for privacy
-                if (!uiState.isMicMuted) {
-                    onToggleMute()
+                if (!latestIsMicMuted) {
+                    latestOnToggleMute()
                 }
             }
         }
@@ -198,12 +202,14 @@ fun VideoChatScreen(
     // Automatically scroll to newest chat message
     LaunchedEffect(uiState.chatMessages.size) {
         if (uiState.chatMessages.isNotEmpty()) {
-            chatListState.animateScrollToItem(uiState.chatMessages.size - 1)
+            runCatching {
+                chatListState.animateScrollToItem(uiState.chatMessages.size - 1)
+            }
         }
     }
 
-    var showModerationSheet by rememberSaveable { mutableStateOf(false) }
-    var showEmojiQuickRow by rememberSaveable { mutableStateOf(false) }
+    var showModerationSheet by remember { mutableStateOf(false) }
+    var showEmojiQuickRow by remember { mutableStateOf(false) }
 
     val activeRoom = uiState.activeRoom
     val isSearching = uiState.matchmakingState is MatchmakingState.Searching ||

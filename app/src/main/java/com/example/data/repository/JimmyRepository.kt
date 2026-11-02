@@ -25,17 +25,15 @@ import kotlinx.coroutines.tasks.await
 
 class JimmyRepository(
     private val db: FirebaseFirestore,
-    private val auth: FirebaseAuth = Firebase.auth
+    private val auth: FirebaseAuth? = runCatching { Firebase.auth }.getOrNull()
 ) {
     constructor(context: Context) : this(
-        FirebaseFirestore.getInstance(
-            context.applicationContext.getString(R.string.firestore_database_id)
-        ),
-        Firebase.auth
+        com.example.ui.auth.getSafeFirestore(context.applicationContext ?: context),
+        com.example.ui.auth.getSafeFirebaseAuth(context.applicationContext ?: context)
     )
 
     private fun requireUserId(): String {
-        return auth.currentUser?.uid
+        return auth?.currentUser?.uid
             ?: throw IllegalStateException("User must be signed in with Google before accessing Firestore.")
     }
 

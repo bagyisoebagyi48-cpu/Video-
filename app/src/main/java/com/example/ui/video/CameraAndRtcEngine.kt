@@ -3,16 +3,10 @@ package com.example.ui.video
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.ImageFormat
-import android.graphics.Matrix
-import android.graphics.Rect
-import android.graphics.YuvImage
 import android.media.AudioManager
 import android.util.Base64
 import android.util.Log
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -40,7 +34,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -49,8 +42,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,13 +61,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.example.BuildConfig
 import com.example.data.model.CountryOption
 import com.example.ui.theme.JimmyBlueAccent
 import com.example.ui.theme.JimmyCyanGlow
 import com.example.ui.theme.JimmyNavyCard
 import com.example.ui.theme.JimmyNavyDarkest
-import com.example.ui.theme.JimmyNavyDeep
 import com.example.ui.theme.JimmyOnlineGreen
 import com.example.ui.theme.JimmyOrangeBright
 import com.example.ui.theme.JimmyOrangeLight
@@ -82,8 +73,11 @@ import com.example.ui.theme.JimmyTextPrimary
 import com.example.ui.theme.JimmyTextSecondary
 import java.io.ByteArrayOutputStream
 import java.util.UUID
-import java.util.concurrent.Executors
 import kotlin.math.sin
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 
 object WebRtcSessionDescriptor {
     private const val DEFAULT_STUN_URL = "stun:stun.l.google.com:19302"
@@ -126,14 +120,13 @@ fun LocalCameraPreviewSurface(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val lastCaptureTimestamp = remember { mutableLongStateOf(0L) }
-    val previewView = remember {
+    val latestOnFrameCaptured by rememberUpdatedState(onFrameCaptured)
+    val previewView = remember(context) {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             scaleType = PreviewView.ScaleType.FILL_CENTER
         }
     }
-    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
 
     LaunchedEffect(isMicMuted) {
         WebRtcSessionDescriptor.configureCallAudioRouting(
@@ -141,6 +134,23 @@ fun LocalCameraPreviewSurface(
             enableCallMode = true,
             isMuted = isMicMuted
         )
+    }
+
+    // Periodically sample previewView.bitmap on the main thread and compress on Dispatchers.Default
+    // Avoids YuvImage JNI native buffer issues and avoids Compose snapshot state access from background threads
+    LaunchedEffect(lifecycleOwner, useFrontCamera) {
+        while (isActive) {
+            delay(2500L)
+            val snapshotBitmap = runCatching { previewView.bitmap }.getOrNull()
+            if (snapshotBitmap != null) {
+                val encoded = withContext(Dispatchers.Default) {
+                    encodeBitmapToCompactBase64(snapshotBitmap)
+                }
+                if (!encoded.isNullOrBlank()) {
+                    runCatching { latestOnFrameCaptured(encoded) }
+                }
+            }
+        }
     }
 
     DisposableEffect(lifecycleOwner, useFrontCamera) {
@@ -151,28 +161,6 @@ fun LocalCameraPreviewSurface(
                 val preview = Preview.Builder().build().also {
                     it.surfaceProvider = previewView.surfaceProvider
                 }
-
-                val imageAnalysis = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-                    .also { analysis ->
-                        analysis.setAnalyzer(analysisExecutor) { imageProxy ->
-                            try {
-                                val now = System.currentTimeMillis()
-                                if (now - lastCaptureTimestamp.longValue >= 2200L) {
-                                    lastCaptureTimestamp.longValue = now
-                                    val encoded = encodeImageProxyToCompactBase64(imageProxy, useFrontCamera)
-                                    if (encoded != null) {
-                                        onFrameCaptured(encoded)
-                                    }
-                                }
-                            } catch (t: Throwable) {
-                                Log.w("JimmyCameraX", "Frame encode error: ${t.message}")
-                            } finally {
-                                runCatching { imageProxy.close() }
-                            }
-                        }
-                    }
 
                 val preferredSelector = if (useFrontCamera) {
                     CameraSelector.DEFAULT_FRONT_CAMERA
@@ -195,19 +183,24 @@ fun LocalCameraPreviewSurface(
                     cameraProvider.bindToLifecycle(
                         lifecycleOwner,
                         activeSelector,
-                        preview,
-                        imageAnalysis
+                        preview
                     )
                 }
             }.onFailure { err ->
                 Log.w("JimmyCameraX", "Camera bind fallback: ${err.message}")
             }
         }
-        cameraProviderFuture?.addListener(listener, ContextCompat.getMainExecutor(context))
+        if (cameraProviderFuture != null) {
+            runCatching {
+                cameraProviderFuture.addListener(listener, ContextCompat.getMainExecutor(context))
+            }
+        }
 
         onDispose {
             runCatching {
-                cameraProviderFuture?.get()?.unbindAll()
+                if (cameraProviderFuture?.isDone == true) {
+                    cameraProviderFuture.get()?.unbindAll()
+                }
             }
             WebRtcSessionDescriptor.configureCallAudioRouting(
                 context = context,
@@ -219,46 +212,24 @@ fun LocalCameraPreviewSurface(
 
     Box(modifier = modifier.background(JimmyNavyDarkest)) {
         AndroidView(
-            factory = { previewView },
+            factory = {
+                (previewView.parent as? android.view.ViewGroup)?.removeView(previewView)
+                previewView
+            },
             modifier = Modifier.fillMaxSize()
         )
     }
 }
 
-private fun encodeImageProxyToCompactBase64(
-    imageProxy: ImageProxy,
-    isFrontCamera: Boolean
-): String? = runCatching {
-    if (imageProxy.format != ImageFormat.YUV_420_888 || imageProxy.planes.size < 3) return null
-    val yBuffer = imageProxy.planes[0].buffer
-    val uBuffer = imageProxy.planes[1].buffer
-    val vBuffer = imageProxy.planes[2].buffer
-
-    val ySize = yBuffer.remaining()
-    val uSize = uBuffer.remaining()
-    val vSize = vBuffer.remaining()
-
-    val nv21 = ByteArray(ySize + uSize + vSize)
-    yBuffer.get(nv21, 0, ySize)
-    vBuffer.get(nv21, ySize, vSize)
-    uBuffer.get(nv21, ySize + vSize, uSize)
-
-    val yuvImage = YuvImage(nv21, ImageFormat.NV21, imageProxy.width, imageProxy.height, null)
-    val out = ByteArrayOutputStream()
-    yuvImage.compressToJpeg(Rect(0, 0, imageProxy.width, imageProxy.height), 45, out)
-    val jpegBytes = out.toByteArray()
-    val rawBitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size) ?: return null
-
-    val matrix = Matrix().apply {
-        postRotate(imageProxy.imageInfo.rotationDegrees.toFloat())
-        if (isFrontCamera) {
-            postScale(-1f, 1f)
-        }
-    }
-    val scaled = Bitmap.createScaledBitmap(rawBitmap, 96, 128, true)
-    val rotated = Bitmap.createBitmap(scaled, 0, 0, scaled.width, scaled.height, matrix, true)
+private fun encodeBitmapToCompactBase64(bitmap: Bitmap): String? = runCatching {
+    if (bitmap.width <= 0 || bitmap.height <= 0) return null
+    val scaled = Bitmap.createScaledBitmap(bitmap, 96, 128, true)
     val compressedOut = ByteArrayOutputStream()
-    rotated.compress(Bitmap.CompressFormat.JPEG, 45, compressedOut)
+    scaled.compress(Bitmap.CompressFormat.JPEG, 45, compressedOut)
+    if (scaled !== bitmap) {
+        runCatching { scaled.recycle() }
+    }
+    runCatching { bitmap.recycle() }
     Base64.encodeToString(compressedOut.toByteArray(), Base64.NO_WRAP)
 }.getOrNull()
 

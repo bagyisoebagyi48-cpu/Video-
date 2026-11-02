@@ -85,6 +85,7 @@ fun SplashScreen(
     ) {
         // Subtle starry cosmos background
         Canvas(modifier = Modifier.fillMaxSize()) {
+            if (size.width <= 1f || size.height <= 1f) return@Canvas
             val stars = listOf(
                 Offset(0.12f, 0.08f), Offset(0.84f, 0.11f), Offset(0.28f, 0.16f),
                 Offset(0.68f, 0.19f), Offset(0.16f, 0.34f), Offset(0.88f, 0.31f),

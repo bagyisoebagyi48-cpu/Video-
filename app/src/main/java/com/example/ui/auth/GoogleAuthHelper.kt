@@ -22,6 +22,7 @@ import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -31,6 +32,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
 private const val AUTH_TAG = "JimmyAuth"
+private val isCredentialRequestInFlight = AtomicBoolean(false)
 
 tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
@@ -40,12 +42,12 @@ tailrec fun Context.findActivity(): Activity? = when (this) {
 
 fun ensureFirebaseInitialized(context: Context): Boolean {
     return try {
-        val appContext = context.applicationContext ?: context
-        if (FirebaseApp.getApps(appContext).isNotEmpty()) {
+        if (runCatching { FirebaseApp.getInstance() }.getOrNull() != null) {
             return true
         }
+        val appContext = context.applicationContext ?: context
         val defaultInit = runCatching { FirebaseApp.initializeApp(appContext) }.getOrNull()
-        if (defaultInit != null || FirebaseApp.getApps(appContext).isNotEmpty()) {
+        if (defaultInit != null || runCatching { FirebaseApp.getInstance() }.getOrNull() != null) {
             return true
         }
         // Fallback initialization when google-services resources are not auto-loaded
@@ -58,7 +60,8 @@ fun ensureFirebaseInitialized(context: Context): Boolean {
             .setGcmSenderId("537576131373")
             .setStorageBucket("gen-lang-client-0725848915.firebasestorage.app")
             .build()
-        FirebaseApp.initializeApp(appContext, fallbackOptions) != null
+        FirebaseApp.initializeApp(appContext, fallbackOptions)
+        true
     } catch (t: Throwable) {
         Log.e(AUTH_TAG, "Failed to initialize FirebaseApp", t)
         false
@@ -80,9 +83,14 @@ fun getSafeFirestore(context: Context): FirebaseFirestore {
     val dbId = runCatching {
         context.getString(R.string.firestore_database_id).trim()
     }.getOrDefault("")
-    return if (dbId.isNotEmpty()) {
-        FirebaseFirestore.getInstance(dbId)
-    } else {
+    return try {
+        if (dbId.isNotEmpty()) {
+            FirebaseFirestore.getInstance(dbId)
+        } else {
+            FirebaseFirestore.getInstance()
+        }
+    } catch (t: Throwable) {
+        Log.w(AUTH_TAG, "Falling back to default Firestore instance: ${t.message}")
         FirebaseFirestore.getInstance()
     }
 }
@@ -125,6 +133,10 @@ fun attemptAutoSignIn(
             onUnauthenticated()
             return
         }
+        if (!isCredentialRequestInFlight.compareAndSet(false, true)) {
+            onUnauthenticated()
+            return
+        }
 
         val googleIdOption = GetGoogleIdOption.Builder()
             .setFilterByAuthorizedAccounts(true)
@@ -151,9 +163,12 @@ fun attemptAutoSignIn(
                 }
             } catch (t: Throwable) {
                 onUnauthenticated()
+            } finally {
+                isCredentialRequestInFlight.set(false)
             }
         }
     } catch (t: Throwable) {
+        isCredentialRequestInFlight.set(false)
         Log.w(AUTH_TAG, "Auto sign-in skipped: ${t.message}")
         onUnauthenticated()
     }
@@ -173,8 +188,14 @@ fun onGoogleSignInClicked(
             onAuthError("Firebase Authentication is still initializing. Please try again.")
             return
         }
+        if (auth.currentUser != null) {
+            onAuthSuccess()
+            return
+        }
         val activity = context.findActivity()
-        if (activity == null || credentialManager == null) {
+        val resolvedCredentialManager = credentialManager
+            ?: runCatching { CredentialManager.create(activity ?: context) }.getOrNull()
+        if (activity == null || resolvedCredentialManager == null) {
             onAuthError("Google Sign-In requires an active Activity window.")
             return
         }
@@ -183,16 +204,35 @@ fun onGoogleSignInClicked(
             onAuthError("Google Sign-In configuration missing: default_web_client_id not found")
             return
         }
+        if (!isCredentialRequestInFlight.compareAndSet(false, true)) {
+            return
+        }
 
-        // One option per request: GetSignInWithGoogleOption exclusively for interactive sign-in
+        // Primary interactive option: GetSignInWithGoogleOption (one option per request)
         val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
-        val request = GetCredentialRequest.Builder()
+        val primaryRequest = GetCredentialRequest.Builder()
             .addCredentialOption(signInOption)
             .build()
 
         scope.launch {
             try {
-                val result = credentialManager.getCredential(activity, request)
+                val result = try {
+                    resolvedCredentialManager.getCredential(activity, primaryRequest)
+                } catch (cancelEx: GetCredentialCancellationException) {
+                    throw cancelEx
+                } catch (primaryErr: Throwable) {
+                    Log.w(AUTH_TAG, "Primary SignInWithGoogle option failed, trying GoogleIdOption fallback", primaryErr)
+                    val fallbackOption = GetGoogleIdOption.Builder()
+                        .setFilterByAuthorizedAccounts(false)
+                        .setServerClientId(clientId)
+                        .setAutoSelectEnabled(false)
+                        .build()
+                    val fallbackRequest = GetCredentialRequest.Builder()
+                        .addCredentialOption(fallbackOption)
+                        .build()
+                    resolvedCredentialManager.getCredential(activity, fallbackRequest)
+                }
+
                 val credential = result.credential
                 if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                     val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
@@ -207,10 +247,13 @@ fun onGoogleSignInClicked(
                 onAuthCancelled()
             } catch (t: Throwable) {
                 Log.e(AUTH_TAG, "Google Sign-In failed", t)
-                onAuthError(t.localizedMessage ?: "Sign in failed")
+                onAuthError(t.localizedMessage ?: "Sign in failed. Please check Google Play Services.")
+            } finally {
+                isCredentialRequestInFlight.set(false)
             }
         }
     } catch (t: Throwable) {
+        isCredentialRequestInFlight.set(false)
         Log.e(AUTH_TAG, "Failed to start Google Sign-In", t)
         onAuthError(t.localizedMessage ?: "Unable to launch Google Sign-In")
     }
