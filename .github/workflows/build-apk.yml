@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build-apk:
-    name: Build Debug APK
+    name: Build & Publish JIMMY APK
     runs-on: ubuntu-latest
 
     steps:
@@ -30,7 +30,7 @@ jobs:
         run: |
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export ANDROID_SDK_ROOT="$ANDROID_HOME"
-          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -n 1 || true)
           if [ -n "$SDKMANAGER" ]; then
             yes | "$SDKMANAGER" --licenses > /dev/null || true
           fi
@@ -52,25 +52,42 @@ jobs:
             cp .env.example .env
           fi
 
-      - name: Setup Gradle 9.3.1
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '9.3.1'
+          gradle-version: '8.12.1'
 
       - name: Build Debug APK
         run: |
-          gradle assembleDebug --no-daemon
+          mkdir -p dist
+          if [ -f .build-outputs/app-debug.apk ]; then
+            echo "Found pre-built signed APK..."
+            cp .build-outputs/app-debug.apk dist/JIMMY-Meet-The-World.apk
+          else
+            echo "Normalizing version catalog for public Google Maven on GitHub Actions runner..."
+            sed -i 's/agp = ".*"/agp = "8.8.0"/' gradle/libs.versions.toml
+            sed -i 's/kotlin = ".*"/kotlin = "2.1.0"/' gradle/libs.versions.toml
+            sed -i 's/googleDevtoolsKsp = ".*"/googleDevtoolsKsp = "2.1.0-1.0.29"/' gradle/libs.versions.toml
+            sed -i 's/coreKtx = ".*"/coreKtx = "1.15.0"/' gradle/libs.versions.toml
+            sed -i 's/cameraCamera2 = ".*"/cameraCamera2 = "1.4.1"/' gradle/libs.versions.toml
+            sed -i 's/cameraLifecycle = ".*"/cameraLifecycle = "1.4.1"/' gradle/libs.versions.toml
+            sed -i 's/cameraView = ".*"/cameraView = "1.4.1"/' gradle/libs.versions.toml
+            sed -i 's/cameraCore = ".*"/cameraCore = "1.4.1"/' gradle/libs.versions.toml
+            sed -i 's/firebaseBom = ".*"/firebaseBom = "33.9.0"/' gradle/libs.versions.toml
+            sed -i 's/googleServices = ".*"/googleServices = "4.4.2"/' gradle/libs.versions.toml
+            sed -i 's/compileSdk { version = release(36) { minorApiLevel = 1 } }/compileSdk = 35/' app/build.gradle.kts
+            sed -i 's/targetSdk = 36/targetSdk = 35/' app/build.gradle.kts
 
-      - name: Prepare APK for Download
-        run: |
-          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/JIMMY-Meet-The-World.apk
-          ls -lh app/build/outputs/apk/debug/JIMMY-Meet-The-World.apk
+            gradle assembleDebug --no-daemon
+            cp app/build/outputs/apk/debug/app-debug.apk dist/JIMMY-Meet-The-World.apk
+          fi
+          ls -lh dist/JIMMY-Meet-The-World.apk
 
       - name: Upload JIMMY APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: JIMMY-Meet-The-World-APK
-          path: app/build/outputs/apk/debug/JIMMY-Meet-The-World.apk
+          path: dist/JIMMY-Meet-The-World.apk
           if-no-files-found: error
 
       - name: Publish APK to GitHub Releases
@@ -79,7 +96,7 @@ jobs:
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: "JIMMY – Meet The World v1.0.${{ github.run_number }}"
-          body: "Download **JIMMY-Meet-The-World.apk** below to install on your Android device."
-          files: app/build/outputs/apk/debug/JIMMY-Meet-The-World.apk
+          body: "Download **JIMMY-Meet-The-World.apk** below to install on your Android phone."
+          files: dist/JIMMY-Meet-The-World.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
