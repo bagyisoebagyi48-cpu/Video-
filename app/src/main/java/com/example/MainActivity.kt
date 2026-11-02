@@ -23,21 +23,22 @@ import com.example.data.model.CountryCatalog
 import com.example.data.repository.JimmyRepository
 import com.example.ui.auth.attemptAutoSignIn
 import com.example.ui.auth.authStateFlow
+import com.example.ui.auth.ensureFirebaseInitialized
+import com.example.ui.auth.getSafeFirebaseAuth
+import com.example.ui.auth.getSafeFirestore
 import com.example.ui.screens.SplashScreen
 import com.example.ui.screens.VideoChatScreen
 import com.example.ui.screens.WelcomeScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.ActiveAppScreen
 import com.example.ui.viewmodel.JimmyViewModel
-import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.auth
-import com.google.firebase.firestore.FirebaseFirestore
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        ensureFirebaseInitialized(this)
+        runCatching { enableEdgeToEdge() }
         setContent {
             MyApplicationTheme {
                 JimmyAppRoot()
@@ -47,19 +48,31 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun JimmyAppRoot(auth: FirebaseAuth = Firebase.auth) {
+fun JimmyAppRoot(authOverride: FirebaseAuth? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val credentialManager = remember { CredentialManager.create(context) }
+    val auth = remember(authOverride, context) {
+        authOverride ?: getSafeFirebaseAuth(context)
+    }
+    val credentialManager = remember(context) {
+        runCatching { CredentialManager.create(context) }.getOrNull()
+    }
 
     var showSplash by rememberSaveable { mutableStateOf(true) }
-    val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
+    val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth?.currentUser)
 
     // Pre-auth local country selection state so the Welcome screen is interactive immediately
     var guestYourCountry by remember { mutableStateOf(CountryCatalog.detectDeviceCountry()) }
     var guestConnectWith by remember { mutableStateOf(CountryCatalog.ALL_COUNTRIES) }
     var guestAgeVerified by rememberSaveable { mutableStateOf(true) }
     var guestToast by remember { mutableStateOf<String?>(null) }
+
+    if (showSplash) {
+        SplashScreen(
+            onSplashFinished = { showSplash = false }
+        )
+        return
+    }
 
     LaunchedEffect(Unit) {
         attemptAutoSignIn(
@@ -71,15 +84,8 @@ fun JimmyAppRoot(auth: FirebaseAuth = Firebase.auth) {
         )
     }
 
-    if (showSplash) {
-        SplashScreen(
-            onSplashFinished = { showSplash = false }
-        )
-        return
-    }
-
     val authenticatedUser = currentUser
-    if (authenticatedUser == null) {
+    if (authenticatedUser == null || auth == null) {
         // Navigation-Level Auth Gate: Do not instantiate JimmyViewModel or query Firestore while unauthenticated
         WelcomeScreen(
             isAuthenticated = false,
@@ -105,8 +111,7 @@ fun JimmyAppRoot(auth: FirebaseAuth = Firebase.auth) {
                     val app = checkNotNull(this[APPLICATION_KEY]) {
                         "APPLICATION_KEY missing from CreationExtras"
                     }
-                    val databaseId = app.getString(R.string.firestore_database_id)
-                    val db = FirebaseFirestore.getInstance(databaseId)
+                    val db = getSafeFirestore(app)
                     JimmyViewModel(
                         repository = JimmyRepository(db, auth),
                         currentUserId = authenticatedUser.uid,

@@ -129,7 +129,9 @@ fun WelcomeScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val credentialManager = remember { CredentialManager.create(context) }
+    val credentialManager = remember(context) {
+        runCatching { CredentialManager.create(context) }.getOrNull()
+    }
     val snackbarHostState = remember { SnackbarHostState() }
 
     var isSigningIn by remember { mutableStateOf(false) }
@@ -475,6 +477,7 @@ fun WelcomeScreen(
                             TextButton(
                                 onClick = {
                                     signOutUser(
+                                        context = context,
                                         credentialManager = credentialManager,
                                         onSignOutComplete = onSignOut,
                                         scope = scope

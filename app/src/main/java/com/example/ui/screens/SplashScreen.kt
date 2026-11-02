@@ -132,6 +132,7 @@ fun SplashScreen(
                     modifier = Modifier.padding(top = 80.dp)
                 ) {
                     Canvas(modifier = Modifier.size(46.dp)) {
+                        if (size.width <= 1f || size.height <= 1f) return@Canvas
                         rotate(degrees = spinDegrees) {
                             drawArc(
                                 brush = Brush.sweepGradient(
@@ -145,7 +146,7 @@ fun SplashScreen(
                                 startAngle = 0f,
                                 sweepAngle = 290f,
                                 useCenter = false,
-                                style = Stroke(width = 4.5.dp.toPx(), cap = StrokeCap.Round)
+                                style = Stroke(width = 4.5.dp.toPx().coerceAtLeast(1f), cap = StrokeCap.Round)
                             )
                         }
                     }

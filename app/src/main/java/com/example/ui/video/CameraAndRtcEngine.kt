@@ -144,10 +144,10 @@ fun LocalCameraPreviewSurface(
     }
 
     DisposableEffect(lifecycleOwner, useFrontCamera) {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        val cameraProviderFuture = runCatching { ProcessCameraProvider.getInstance(context) }.getOrNull()
         val listener = Runnable {
             runCatching {
-                val cameraProvider = cameraProviderFuture.get()
+                val cameraProvider = cameraProviderFuture?.get() ?: return@Runnable
                 val preview = Preview.Builder().build().also {
                     it.surfaceProvider = previewView.surfaceProvider
                 }
@@ -157,40 +157,57 @@ fun LocalCameraPreviewSurface(
                     .build()
                     .also { analysis ->
                         analysis.setAnalyzer(analysisExecutor) { imageProxy ->
-                            val now = System.currentTimeMillis()
-                            if (now - lastCaptureTimestamp.longValue >= 2200L) {
-                                lastCaptureTimestamp.longValue = now
-                                val encoded = encodeImageProxyToCompactBase64(imageProxy, useFrontCamera)
-                                if (encoded != null) {
-                                    onFrameCaptured(encoded)
+                            try {
+                                val now = System.currentTimeMillis()
+                                if (now - lastCaptureTimestamp.longValue >= 2200L) {
+                                    lastCaptureTimestamp.longValue = now
+                                    val encoded = encodeImageProxyToCompactBase64(imageProxy, useFrontCamera)
+                                    if (encoded != null) {
+                                        onFrameCaptured(encoded)
+                                    }
                                 }
+                            } catch (t: Throwable) {
+                                Log.w("JimmyCameraX", "Frame encode error: ${t.message}")
+                            } finally {
+                                runCatching { imageProxy.close() }
                             }
-                            imageProxy.close()
                         }
                     }
 
-                val selector = if (useFrontCamera) {
+                val preferredSelector = if (useFrontCamera) {
                     CameraSelector.DEFAULT_FRONT_CAMERA
                 } else {
                     CameraSelector.DEFAULT_BACK_CAMERA
                 }
+                val fallbackSelector = if (useFrontCamera) {
+                    CameraSelector.DEFAULT_BACK_CAMERA
+                } else {
+                    CameraSelector.DEFAULT_FRONT_CAMERA
+                }
+                val activeSelector = when {
+                    runCatching { cameraProvider.hasCamera(preferredSelector) }.getOrDefault(false) -> preferredSelector
+                    runCatching { cameraProvider.hasCamera(fallbackSelector) }.getOrDefault(false) -> fallbackSelector
+                    else -> null
+                }
 
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    lifecycleOwner,
-                    selector,
-                    preview,
-                    imageAnalysis
-                )
+                if (activeSelector != null) {
+                    cameraProvider.bindToLifecycle(
+                        lifecycleOwner,
+                        activeSelector,
+                        preview,
+                        imageAnalysis
+                    )
+                }
             }.onFailure { err ->
                 Log.w("JimmyCameraX", "Camera bind fallback: ${err.message}")
             }
         }
-        cameraProviderFuture.addListener(listener, ContextCompat.getMainExecutor(context))
+        cameraProviderFuture?.addListener(listener, ContextCompat.getMainExecutor(context))
 
         onDispose {
             runCatching {
-                cameraProviderFuture.get().unbindAll()
+                cameraProviderFuture?.get()?.unbindAll()
             }
             WebRtcSessionDescriptor.configureCallAudioRouting(
                 context = context,
@@ -304,16 +321,17 @@ fun RemoteStrangerVideoStage(
         if (isSearching) {
             // Searching / Matchmaking Radar Animation
             Canvas(modifier = Modifier.fillMaxSize()) {
+                if (size.width <= 1f || size.height <= 1f) return@Canvas
                 val cx = size.width / 2f
                 val cy = size.height / 2f
-                val maxR = size.minDimension * 0.42f
+                val maxR = (size.minDimension * 0.42f).coerceAtLeast(1f)
                 for (ring in 0..2) {
-                    val progress = (radarWave + ring * 0.33f) % 1f
+                    val progress = ((radarWave + ring * 0.33f) % 1f).coerceIn(0f, 1f)
                     drawCircle(
-                        color = JimmyOrangeBright.copy(alpha = (1f - progress) * 0.55f),
-                        radius = maxR * (0.25f + progress * 0.75f),
+                        color = JimmyOrangeBright.copy(alpha = ((1f - progress) * 0.55f).coerceIn(0f, 1f)),
+                        radius = (maxR * (0.25f + progress * 0.75f)).coerceAtLeast(1f),
                         center = Offset(cx, cy),
-                        style = Stroke(width = 3.dp.toPx())
+                        style = Stroke(width = 3.dp.toPx().coerceAtLeast(1f))
                     )
                 }
             }
@@ -364,8 +382,10 @@ fun RemoteStrangerVideoStage(
         } else {
             // Connected Stranger Live Stream Stage (while awaiting remote camera frame packet)
             Canvas(modifier = Modifier.fillMaxSize()) {
+                if (size.width <= 1f || size.height <= 1f) return@Canvas
                 val w = size.width
                 val h = size.height
+                val circleR = (w * 0.6f).coerceAtLeast(1f)
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
@@ -374,9 +394,9 @@ fun RemoteStrangerVideoStage(
                             Color.Transparent
                         ),
                         center = Offset(w * 0.5f, h * 0.45f),
-                        radius = w * 0.6f
+                        radius = circleR
                     ),
-                    radius = w * 0.6f,
+                    radius = circleR,
                     center = Offset(w * 0.5f, h * 0.45f)
                 )
 
@@ -393,7 +413,7 @@ fun RemoteStrangerVideoStage(
                             color = JimmyCyanGlow.copy(alpha = 0.78f),
                             start = Offset(startX + i * step, h * 0.78f),
                             end = Offset(startX + i * step, h * 0.78f - barH),
-                            strokeWidth = 4.dp.toPx(),
+                            strokeWidth = 4.dp.toPx().coerceAtLeast(1f),
                             cap = StrokeCap.Round
                         )
                     }

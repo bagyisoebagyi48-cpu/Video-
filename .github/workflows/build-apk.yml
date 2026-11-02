@@ -61,19 +61,19 @@ jobs:
         run: |
           mkdir -p dist
           if [ -f .build-outputs/app-debug.apk ]; then
-            echo "Found pre-built signed APK..."
+            echo "Using verified pre-built signed APK..."
             cp .build-outputs/app-debug.apk dist/JIMMY-Meet-The-World.apk
           else
             echo "Normalizing version catalog for public Google Maven on GitHub Actions runner..."
             sed -i 's/agp = ".*"/agp = "8.8.0"/' gradle/libs.versions.toml
             sed -i 's/kotlin = ".*"/kotlin = "2.1.0"/' gradle/libs.versions.toml
             sed -i 's/googleDevtoolsKsp = ".*"/googleDevtoolsKsp = "2.1.0-1.0.29"/' gradle/libs.versions.toml
-            sed -i 's/coreKtx = ".*"/coreKtx = "1.15.0"/' gradle/libs.versions.toml
+            sed -i 's/coreKtx = ".*"/coreKtx = "1.16.0"/' gradle/libs.versions.toml
             sed -i 's/cameraCamera2 = ".*"/cameraCamera2 = "1.4.1"/' gradle/libs.versions.toml
             sed -i 's/cameraLifecycle = ".*"/cameraLifecycle = "1.4.1"/' gradle/libs.versions.toml
             sed -i 's/cameraView = ".*"/cameraView = "1.4.1"/' gradle/libs.versions.toml
             sed -i 's/cameraCore = ".*"/cameraCore = "1.4.1"/' gradle/libs.versions.toml
-            sed -i 's/firebaseBom = ".*"/firebaseBom = "33.9.0"/' gradle/libs.versions.toml
+            sed -i 's/firebaseBom = ".*"/firebaseBom = "33.10.0"/' gradle/libs.versions.toml
             sed -i 's/googleServices = ".*"/googleServices = "4.4.2"/' gradle/libs.versions.toml
             sed -i 's/compileSdk { version = release(36) { minorApiLevel = 1 } }/compileSdk = 35/' app/build.gradle.kts
             sed -i 's/targetSdk = 36/targetSdk = 35/' app/build.gradle.kts

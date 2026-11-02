@@ -50,13 +50,11 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.BuildConfig
 import com.example.ui.theme.JimmyBlueAccent
 import com.example.ui.theme.JimmyBlueLight
 import com.example.ui.theme.JimmyCyanGlow
 import com.example.ui.theme.JimmyGoldCrown
 import com.example.ui.theme.JimmyNavyCard
-import com.example.ui.theme.JimmyNavyDarkest
 import com.example.ui.theme.JimmyNavyDeep
 import com.example.ui.theme.JimmyOrangeBright
 import com.example.ui.theme.JimmyOrangeDeep
@@ -66,7 +64,6 @@ import com.example.ui.theme.JimmyTextPrimary
 import com.example.ui.theme.JimmyTextSecondary
 import com.example.ui.theme.OutfitFontFamily
 import kotlin.math.PI
-import kotlin.math.cos
 import kotlin.math.sin
 
 @Composable
@@ -99,41 +96,44 @@ fun JimmyLogoHeader(
                 contentAlignment = Alignment.Center
             ) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
+                    if (size.width <= 1f || size.height <= 1f) return@Canvas
                     val w = size.width
                     val h = size.height
+                    val outerRadius = (w * 0.56f).coerceAtLeast(1f)
                     // Outer neon orange glow
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                JimmyOrangeBright.copy(alpha = 0.42f * pulseAlpha),
+                                JimmyOrangeBright.copy(alpha = (0.42f * pulseAlpha).coerceIn(0f, 1f)),
                                 Color.Transparent
-                            )
+                            ),
+                            center = Offset(w * 0.5f, h * 0.5f),
+                            radius = outerRadius
                         ),
-                        radius = w * 0.56f,
+                        radius = outerRadius,
                         center = Offset(w * 0.5f, h * 0.5f)
                     )
-                    // Speech bubble outline in glowing orange gradient
-                    val bubblePath = Path().apply {
-                        moveTo(w * 0.25f, h * 0.20f)
-                        lineTo(w * 0.76f, h * 0.20f)
-                        quadraticTo(w * 0.90f, h * 0.20f, w * 0.90f, h * 0.36f)
-                        lineTo(w * 0.90f, h * 0.62f)
-                        quadraticTo(w * 0.90f, h * 0.78f, w * 0.74f, h * 0.78f)
-                        lineTo(w * 0.48f, h * 0.78f)
-                        lineTo(w * 0.30f, h * 0.92f)
-                        lineTo(w * 0.34f, h * 0.78f)
-                        lineTo(w * 0.25f, h * 0.78f)
-                        quadraticTo(w * 0.10f, h * 0.78f, w * 0.10f, h * 0.62f)
-                        lineTo(w * 0.10f, h * 0.36f)
-                        quadraticTo(w * 0.10f, h * 0.20f, w * 0.25f, h * 0.20f)
-                        close()
-                    }
-                    drawPath(
-                        path = bubblePath,
+                    // Speech bubble rounded rect + tail in glowing orange gradient
+                    drawRoundRect(
                         brush = Brush.linearGradient(
                             colors = listOf(JimmyGoldCrown, JimmyOrangeBright, JimmyOrangeDeep)
                         ),
-                        style = Stroke(width = w * 0.075f, cap = StrokeCap.Round)
+                        topLeft = Offset(w * 0.10f, h * 0.20f),
+                        size = Size((w * 0.80f).coerceAtLeast(1f), (h * 0.58f).coerceAtLeast(1f)),
+                        cornerRadius = CornerRadius(w * 0.16f, w * 0.16f),
+                        style = Stroke(width = (w * 0.075f).coerceAtLeast(1f), cap = StrokeCap.Round)
+                    )
+                    val tailPath = Path().apply {
+                        moveTo(w * 0.34f, h * 0.78f)
+                        lineTo(w * 0.28f, h * 0.92f)
+                        lineTo(w * 0.48f, h * 0.78f)
+                    }
+                    drawPath(
+                        path = tailPath,
+                        brush = Brush.linearGradient(
+                            colors = listOf(JimmyOrangeBright, JimmyOrangeDeep)
+                        ),
+                        style = Stroke(width = (w * 0.075f).coerceAtLeast(1f), cap = StrokeCap.Round)
                     )
                 }
                 Icon(
@@ -155,6 +155,7 @@ fun JimmyLogoHeader(
                     .size(width = 36.dp, height = 22.dp)
                     .offset(x = 4.dp, y = (-12).dp)
             ) {
+                if (size.width <= 1f || size.height <= 1f) return@Canvas
                 val cw = size.width
                 val ch = size.height
                 val crown = Path().apply {
@@ -182,9 +183,7 @@ fun JimmyLogoHeader(
                 text = buildAnnotatedString {
                     withStyle(
                         SpanStyle(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(JimmyGoldCrown, JimmyOrangeBright, JimmyOrangeDeep)
-                            ),
+                            color = JimmyOrangeBright,
                             fontFamily = OutfitFontFamily,
                             fontWeight = FontWeight.Bold,
                             fontStyle = FontStyle.Italic,
@@ -285,22 +284,25 @@ fun GlowingGlobeVisual(
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
+            if (size.width <= 1f || size.height <= 1f) return@Canvas
             val cx = size.width / 2f
             val cy = size.height / 2f
-            val r = size.minDimension * (if (showOrbitingCallers) 0.34f else 0.44f)
+            val r = (size.minDimension * (if (showOrbitingCallers) 0.34f else 0.44f)).coerceAtLeast(1f)
+            val haloRadius = (r * 1.55f).coerceAtLeast(1f)
+            val coreGradientRadius = (r * 1.2f).coerceAtLeast(1f)
 
             // Outer atmospheric blue/cyan halo
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        JimmyCyanGlow.copy(alpha = 0.45f * glowPulse),
+                        JimmyCyanGlow.copy(alpha = (0.45f * glowPulse).coerceIn(0f, 1f)),
                         JimmyBlueAccent.copy(alpha = 0.25f),
                         Color.Transparent
                     ),
                     center = Offset(cx, cy),
-                    radius = r * 1.55f
+                    radius = haloRadius
                 ),
-                radius = r * 1.55f,
+                radius = haloRadius,
                 center = Offset(cx, cy)
             )
 
@@ -313,7 +315,7 @@ fun GlowingGlobeVisual(
                         Color(0xFF050D2A)
                     ),
                     center = Offset(cx - r * 0.25f, cy - r * 0.25f),
-                    radius = r * 1.2f
+                    radius = coreGradientRadius
                 ),
                 radius = r,
                 center = Offset(cx, cy)
@@ -324,7 +326,7 @@ fun GlowingGlobeVisual(
                 drawOval(
                     color = JimmyCyanGlow.copy(alpha = 0.16f),
                     topLeft = Offset(cx - r * 0.92f, cy + r * factor - r * 0.15f),
-                    size = Size(r * 1.84f, r * 0.30f),
+                    size = Size((r * 1.84f).coerceAtLeast(1f), (r * 0.30f).coerceAtLeast(1f)),
                     style = Stroke(width = 1.2f)
                 )
             }
@@ -344,17 +346,17 @@ fun GlowingGlobeVisual(
                 val py = cy + pt.y * r
                 drawCircle(
                     color = Color(0xFF1F6E58).copy(alpha = 0.45f),
-                    radius = r * 0.16f,
+                    radius = (r * 0.16f).coerceAtLeast(1f),
                     center = Offset(px, py)
                 )
                 drawCircle(
                     color = JimmyGoldCrown.copy(alpha = 0.85f),
-                    radius = r * 0.032f,
+                    radius = (r * 0.032f).coerceAtLeast(1f),
                     center = Offset(px, py)
                 )
                 drawCircle(
                     color = JimmyOrangeBright.copy(alpha = 0.40f),
-                    radius = r * 0.075f,
+                    radius = (r * 0.075f).coerceAtLeast(1f),
                     center = Offset(px, py)
                 )
             }
@@ -364,7 +366,7 @@ fun GlowingGlobeVisual(
                 brush = Brush.linearGradient(
                     colors = listOf(
                         JimmyCyanGlow.copy(alpha = 0.75f),
-                         JimmyBlueLight.copy(alpha = 0.25f),
+                        JimmyBlueLight.copy(alpha = 0.25f),
                         Color.Transparent
                     ),
                     start = Offset(cx - r, cy - r),
@@ -388,8 +390,8 @@ fun GlowingGlobeVisual(
                             )
                         ),
                         topLeft = Offset(cx - r * 1.38f, cy - r * 0.42f),
-                        size = Size(r * 2.76f, r * 0.84f),
-                        style = Stroke(width = 3.dp.toPx())
+                        size = Size((r * 2.76f).coerceAtLeast(1f), (r * 0.84f).coerceAtLeast(1f)),
+                        style = Stroke(width = 3.dp.toPx().coerceAtLeast(1f))
                     )
                 }
                 rotate(degrees = 22f, pivot = Offset(cx, cy)) {
@@ -402,8 +404,8 @@ fun GlowingGlobeVisual(
                             )
                         ),
                         topLeft = Offset(cx - r * 1.32f, cy - r * 0.36f),
-                        size = Size(r * 2.64f, r * 0.72f),
-                        style = Stroke(width = 2.dp.toPx())
+                        size = Size((r * 2.64f).coerceAtLeast(1f), (r * 0.72f).coerceAtLeast(1f)),
+                        style = Stroke(width = 2.dp.toPx().coerceAtLeast(1f))
                     )
                 }
             }
@@ -458,6 +460,7 @@ fun WorldSkylineSilhouette(
             .fillMaxWidth()
             .height(68.dp)
     ) {
+        if (size.width <= 1f || size.height <= 1f) return@Canvas
         val w = size.width
         val h = size.height
         val skylineColor = Color(0xFF162458).copy(alpha = 0.72f)
