@@ -21,16 +21,21 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.tasks.await
 
 class JimmyRepository(
-    private val db: FirebaseFirestore,
+    private val db: FirebaseFirestore?,
     private val auth: FirebaseAuth? = runCatching { Firebase.auth }.getOrNull()
 ) {
     constructor(context: Context) : this(
         com.example.ui.auth.getSafeFirestore(context.applicationContext ?: context),
         com.example.ui.auth.getSafeFirebaseAuth(context.applicationContext ?: context)
     )
+
+    private fun requireDb(): FirebaseFirestore {
+        return db ?: throw IllegalStateException("Firebase Firestore is initializing. Please verify network connectivity.")
+    }
 
     private fun requireUserId(): String {
         return auth?.currentUser?.uid
@@ -46,7 +51,7 @@ class JimmyRepository(
         ageVerified: Boolean = true
     ): Result<Unit> = runCatching {
         val uid = requireUserId()
-        val docRef = db.collection("users").document(uid)
+        val docRef = requireDb().collection("users").document(uid)
         val safeName = displayName.trim().ifBlank { "Jimmy User" }.take(60)
         val safeCountryCode = countryCode.trim().ifBlank { "MM" }.take(10)
         val safeCountryName = countryName.trim().ifBlank { "Myanmar" }.take(60)
@@ -88,7 +93,7 @@ class JimmyRepository(
     }
 
     suspend fun getUserProfile(userId: String): Result<UserProfile?> = runCatching {
-        val docRef = db.collection("users").document(userId)
+        val docRef = requireDb().collection("users").document(userId)
         try {
             val snap = docRef.get().await()
             snap.toObject(UserProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
@@ -101,7 +106,8 @@ class JimmyRepository(
     }
 
     fun observeUserProfile(userId: String): Flow<UserProfile?> {
-        val docRef = db.collection("users").document(userId)
+        val firestore = db ?: return emptyFlow()
+        val docRef = firestore.collection("users").document(userId)
         return docRef.snapshots()
             .map { snapshot ->
                 snapshot.toObject(
@@ -124,7 +130,7 @@ class JimmyRepository(
     ): Result<String> = runCatching {
         val uid = requireUserId()
         val roomId = "room_${UUID.randomUUID().toString().replace("-", "").take(20)}"
-        val docRef = db.collection("call_rooms").document(roomId)
+        val docRef = requireDb().collection("call_rooms").document(roomId)
         val payload = mapOf(
             "hostId" to uid,
             "hostName" to hostName.trim().ifBlank { "Jimmy Explorer" }.take(60),
@@ -166,7 +172,7 @@ class JimmyRepository(
         rtcAnswerSdp: String = ""
     ): Result<Unit> = runCatching {
         val uid = requireUserId()
-        val docRef = db.collection("call_rooms").document(roomId)
+        val docRef = requireDb().collection("call_rooms").document(roomId)
         val updates = mapOf(
             "guestId" to uid,
             "guestName" to guestName.trim().ifBlank { "Stranger" }.take(60),
@@ -210,7 +216,7 @@ class JimmyRepository(
         val uid = requireUserId()
         val path = "call_rooms"
         val waitingRooms = try {
-            db.collection(path)
+            requireDb().collection(path)
                 .whereEqualTo("status", "waiting")
                 .get()
                 .await()
@@ -244,7 +250,7 @@ class JimmyRepository(
                 rtcAnswerSdp = rtcOfferOrAnswerSdp
             )
             if (joinResult.isSuccess) {
-                val updatedDoc = db.collection(path).document(candidate.id).get().await()
+                val updatedDoc = requireDb().collection(path).document(candidate.id).get().await()
                 val joinedRoom = updatedDoc.toObject(
                     CallRoom::class.java,
                     DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
@@ -264,7 +270,7 @@ class JimmyRepository(
             rtcOfferSdp = rtcOfferOrAnswerSdp
         ).getOrThrow()
 
-        val createdSnap = db.collection(path).document(newRoomId).get().await()
+        val createdSnap = requireDb().collection(path).document(newRoomId).get().await()
         checkNotNull(
             createdSnap.toObject(
                 CallRoom::class.java,
@@ -274,7 +280,8 @@ class JimmyRepository(
     }
 
     fun observeCallRoom(roomId: String): Flow<CallRoom?> {
-        val docRef = db.collection("call_rooms").document(roomId)
+        val firestore = db ?: return emptyFlow()
+        val docRef = firestore.collection("call_rooms").document(roomId)
         return docRef.snapshots()
             .map { snapshot ->
                 snapshot.toObject(
@@ -289,8 +296,9 @@ class JimmyRepository(
     }
 
     fun observeWaitingRooms(): Flow<List<CallRoom>> {
+        val firestore = db ?: return emptyFlow()
         val path = "call_rooms"
-        return db.collection(path)
+        return firestore.collection(path)
             .whereEqualTo("status", "waiting")
             .snapshots()
             .map { snapshot ->
@@ -314,7 +322,7 @@ class JimmyRepository(
         sdpPayload: String? = null
     ): Result<Unit> = runCatching {
         requireUserId()
-        val docRef = db.collection("call_rooms").document(roomId)
+        val docRef = requireDb().collection("call_rooms").document(roomId)
         val updates = mutableMapOf<String, Any>(
             "updatedAt" to FieldValue.serverTimestamp()
         )
@@ -344,7 +352,7 @@ class JimmyRepository(
     suspend fun endCallRoom(roomId: String): Result<Unit> = runCatching {
         if (roomId.isBlank()) return@runCatching
         requireUserId()
-        val docRef = db.collection("call_rooms").document(roomId)
+        val docRef = requireDb().collection("call_rooms").document(roomId)
         try {
             val snap = docRef.get().await()
             if (snap.exists() && snap.getString("status") != "ended") {
@@ -373,7 +381,7 @@ class JimmyRepository(
         val trimmed = text.trim().take(500)
         require(trimmed.isNotEmpty()) { "Message text cannot be empty" }
         val msgId = "msg_${UUID.randomUUID().toString().replace("-", "").take(20)}"
-        val docRef = db.collection("call_rooms")
+        val docRef = requireDb().collection("call_rooms")
             .document(roomId)
             .collection("messages")
             .document(msgId)
@@ -402,8 +410,9 @@ class JimmyRepository(
     }
 
     fun observeRoomMessages(roomId: String, userId: String): Flow<List<ChatMessage>> {
+        val firestore = db ?: return emptyFlow()
         val path = "call_rooms/$roomId/messages"
-        return db.collection("call_rooms")
+        return firestore.collection("call_rooms")
             .document(roomId)
             .collection("messages")
             .whereArrayContains("participants", userId)
@@ -432,7 +441,7 @@ class JimmyRepository(
             "Invalid target user for moderation"
         }
         val actionId = "mod_${UUID.randomUUID().toString().replace("-", "").take(20)}"
-        val docRef = db.collection("users")
+        val docRef = requireDb().collection("users")
             .document(uid)
             .collection("moderation_actions")
             .document(actionId)
@@ -460,8 +469,9 @@ class JimmyRepository(
     }
 
     fun observeModerationActions(userId: String): Flow<List<ModerationAction>> {
+        val firestore = db ?: return emptyFlow()
         val path = "users/$userId/moderation_actions"
-        return db.collection("users")
+        return firestore.collection("users")
             .document(userId)
             .collection("moderation_actions")
             .whereEqualTo("userId", userId)

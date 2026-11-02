@@ -78,28 +78,30 @@ fun getSafeFirebaseAuth(context: Context): FirebaseAuth? {
     }
 }
 
-fun getSafeFirestore(context: Context): FirebaseFirestore {
+fun getSafeFirestore(context: Context): FirebaseFirestore? {
     ensureFirebaseInitialized(context)
     val dbId = runCatching {
         context.getString(R.string.firestore_database_id).trim()
     }.getOrDefault("")
-    return try {
+    return runCatching {
         if (dbId.isNotEmpty()) {
             FirebaseFirestore.getInstance(dbId)
         } else {
             FirebaseFirestore.getInstance()
         }
-    } catch (t: Throwable) {
-        Log.w(AUTH_TAG, "Falling back to default Firestore instance: ${t.message}")
+    }.recoverCatching {
         FirebaseFirestore.getInstance()
-    }
+    }.onFailure { t ->
+        Log.w(AUTH_TAG, "Firestore currently unavailable: ${t.message}")
+    }.getOrNull()
 }
 
 internal fun FirebaseAuth?.authStateFlow(): Flow<FirebaseUser?> {
     val safeAuth = this ?: return emptyFlow()
     return callbackFlow {
         val listener = FirebaseAuth.AuthStateListener { auth ->
-            trySend(auth.currentUser)
+            val user = runCatching { auth.currentUser }.getOrNull()
+            trySend(user)
         }
         runCatching { safeAuth.addAuthStateListener(listener) }
         awaitClose {

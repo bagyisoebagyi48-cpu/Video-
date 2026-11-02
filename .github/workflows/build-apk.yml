@@ -76,7 +76,7 @@ jobs:
             sed -i 's/firebaseBom = ".*"/firebaseBom = "33.10.0"/' gradle/libs.versions.toml
             sed -i 's/googleServices = ".*"/googleServices = "4.4.2"/' gradle/libs.versions.toml
             sed -i 's/compileSdk { version = release(36) { minorApiLevel = 1 } }/compileSdk = 35/' app/build.gradle.kts
-            sed -i 's/targetSdk = 36/targetSdk = 35/' app/build.gradle.kts
+            sed -i 's/targetSdk = .*/targetSdk = 35/' app/build.gradle.kts
 
             gradle assembleDebug --no-daemon
             cp app/build/outputs/apk/debug/app-debug.apk dist/JIMMY-Meet-The-World.apk

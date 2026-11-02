@@ -222,14 +222,10 @@ fun LocalCameraPreviewSurface(
 }
 
 private fun encodeBitmapToCompactBase64(bitmap: Bitmap): String? = runCatching {
-    if (bitmap.width <= 0 || bitmap.height <= 0) return null
+    if (bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) return null
     val scaled = Bitmap.createScaledBitmap(bitmap, 96, 128, true)
     val compressedOut = ByteArrayOutputStream()
     scaled.compress(Bitmap.CompressFormat.JPEG, 45, compressedOut)
-    if (scaled !== bitmap) {
-        runCatching { scaled.recycle() }
-    }
-    runCatching { bitmap.recycle() }
     Base64.encodeToString(compressedOut.toByteArray(), Base64.NO_WRAP)
 }.getOrNull()
 
