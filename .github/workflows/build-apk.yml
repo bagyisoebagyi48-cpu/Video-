@@ -26,8 +26,14 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android SDK Licenses
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)
+          if [ -n "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses > /dev/null || true
+          fi
 
       - name: Decode Debug Keystore
         run: |
@@ -46,22 +52,19 @@ jobs:
             cp .env.example .env
           fi
 
-      - name: Setup Gradle
+      - name: Setup Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
       - name: Build Debug APK
         run: |
-          if [ -x ./gradlew ]; then
-            ./gradlew assembleDebug --no-daemon
-          else
-            gradle assembleDebug --no-daemon
-          fi
+          gradle assembleDebug --no-daemon
 
-      - name: Rename APK for Download
+      - name: Prepare APK for Download
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/JIMMY-Meet-The-World.apk
+          ls -lh app/build/outputs/apk/debug/JIMMY-Meet-The-World.apk
 
       - name: Upload JIMMY APK Artifact
         uses: actions/upload-artifact@v4
@@ -70,13 +73,13 @@ jobs:
           path: app/build/outputs/apk/debug/JIMMY-Meet-The-World.apk
           if-no-files-found: error
 
-      - name: Create GitHub Release (on Tag or Manual Dispatch)
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+      - name: Publish APK to GitHub Releases
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name == 'main' && format('v1.0.{0}', github.run_number) || github.ref_name }}
-          name: "JIMMY – Meet The World (${{ github.run_number }})"
-          body: "Automated Android APK build for **JIMMY – Meet The World (Random Video Chat)**."
+          tag_name: v1.0.${{ github.run_number }}
+          name: "JIMMY – Meet The World v1.0.${{ github.run_number }}"
+          body: "Download **JIMMY-Meet-The-World.apk** below to install on your Android device."
           files: app/build/outputs/apk/debug/JIMMY-Meet-The-World.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
