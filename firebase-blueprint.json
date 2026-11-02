@@ -1,0 +1,287 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User session profile, country preferences, online status, and age verification for JIMMY random video chat.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated user UID matching request.auth.uid."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name shown during calls."
+        },
+        "countryCode": {
+          "type": "string",
+          "description": "ISO country code of the user (e.g. MM, TH, JP, KR, US)."
+        },
+        "countryName": {
+          "type": "string",
+          "description": "Human-readable country name of the user."
+        },
+        "targetCountryCode": {
+          "type": "string",
+          "description": "Selected destination country code (ALL or specific ISO code)."
+        },
+        "onlineStatus": {
+          "type": "string",
+          "enum": ["online", "searching", "in_call", "offline"],
+          "description": "Current presence and matchmaking state."
+        },
+        "ageVerified": {
+          "type": "boolean",
+          "description": "Whether the user has confirmed they are 18+ years old."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "userId",
+        "displayName",
+        "countryCode",
+        "countryName",
+        "targetCountryCode",
+        "onlineStatus",
+        "ageVerified",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CallRoom": {
+      "title": "CallRoom",
+      "description": "Matchmaking room and WebRTC / live video telemetry session between two strangers.",
+      "type": "object",
+      "properties": {
+        "hostId": {
+          "type": "string",
+          "description": "UID of the user who created the waiting call room."
+        },
+        "hostName": {
+          "type": "string",
+          "description": "Display name of the host."
+        },
+        "hostCountryCode": {
+          "type": "string",
+          "description": "ISO country code of the host."
+        },
+        "hostCountryName": {
+          "type": "string",
+          "description": "Country name of the host."
+        },
+        "targetCountryCode": {
+          "type": "string",
+          "description": "Preferred country filter set by the host (ALL or ISO code)."
+        },
+        "guestId": {
+          "type": "string",
+          "description": "UID of the matched stranger (empty string when waiting)."
+        },
+        "guestName": {
+          "type": "string",
+          "description": "Display name of the matched guest."
+        },
+        "guestCountryCode": {
+          "type": "string",
+          "description": "ISO country code of the matched guest."
+        },
+        "guestCountryName": {
+          "type": "string",
+          "description": "Country name of the matched guest."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["waiting", "connected", "ended"],
+          "description": "Room lifecycle state."
+        },
+        "rtcOfferSdp": {
+          "type": "string",
+          "description": "WebRTC SDP offer / media signaling payload from host."
+        },
+        "rtcAnswerSdp": {
+          "type": "string",
+          "description": "WebRTC SDP answer / media signaling payload from guest."
+        },
+        "hostFrameData": {
+          "type": "string",
+          "description": "Compressed real-time video frame / telemetry from host camera."
+        },
+        "guestFrameData": {
+          "type": "string",
+          "description": "Compressed real-time video frame / telemetry from guest camera."
+        },
+        "hostAudioMuted": {
+          "type": "boolean",
+          "description": "Whether host microphone is muted."
+        },
+        "guestAudioMuted": {
+          "type": "boolean",
+          "description": "Whether guest microphone is muted."
+        },
+        "hostCameraFacing": {
+          "type": "string",
+          "enum": ["front", "back"],
+          "description": "Host active camera lens direction."
+        },
+        "guestCameraFacing": {
+          "type": "string",
+          "enum": ["front", "back"],
+          "description": "Guest active camera lens direction."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when room was created (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when room was last updated (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "hostId",
+        "hostName",
+        "hostCountryCode",
+        "hostCountryName",
+        "targetCountryCode",
+        "guestId",
+        "guestName",
+        "guestCountryCode",
+        "guestCountryName",
+        "status",
+        "rtcOfferSdp",
+        "rtcAnswerSdp",
+        "hostFrameData",
+        "guestFrameData",
+        "hostAudioMuted",
+        "guestAudioMuted",
+        "hostCameraFacing",
+        "guestCameraFacing",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Real-time text message exchanged inside an active video call room.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "description": "ID of the parent call room."
+        },
+        "senderId": {
+          "type": "string",
+          "description": "UID of the sender matching request.auth.uid."
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Display name of the sender."
+        },
+        "text": {
+          "type": "string",
+          "description": "Message text content."
+        },
+        "participants": {
+          "type": "array",
+          "description": "Bounded 2-element array of participant UIDs in the call room for query isolation."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when message was sent (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "roomId",
+        "senderId",
+        "senderName",
+        "text",
+        "participants",
+        "createdAt"
+      ]
+    },
+    "ModerationAction": {
+      "title": "ModerationAction",
+      "description": "Safety report or user block created by an authenticated user.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "UID of the reporting/blocking user."
+        },
+        "targetUserId": {
+          "type": "string",
+          "description": "UID of the reported or blocked stranger."
+        },
+        "targetCountryCode": {
+          "type": "string",
+          "description": "Country code of the reported or blocked stranger."
+        },
+        "actionType": {
+          "type": "string",
+          "enum": ["report", "block"],
+          "description": "Whether this action is a report or a block."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason for reporting or blocking."
+        },
+        "roomId": {
+          "type": "string",
+          "description": "Call room ID where the incident occurred."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the moderation action (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "userId",
+        "targetUserId",
+        "targetCountryCode",
+        "actionType",
+        "reason",
+        "roomId",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "Per-user session profile, country settings, and online status."
+    },
+    "/call_rooms/{roomId}": {
+      "schema": {
+        "$ref": "#/entities/CallRoom"
+      },
+      "description": "Matchmaking queue and active WebRTC / live video call rooms."
+    },
+    "/call_rooms/{roomId}/messages/{messageId}": {
+      "schema": {
+        "$ref": "#/entities/ChatMessage"
+      },
+      "description": "In-call real-time text chat messages scoped to room participants."
+    },
+    "/users/{userId}/moderation_actions/{actionId}": {
+      "schema": {
+        "$ref": "#/entities/ModerationAction"
+      },
+      "description": "Safety reports and blocked user records owned by the user."
+    }
+  }
+}

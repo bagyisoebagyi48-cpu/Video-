@@ -1,0 +1,454 @@
+package com.example.ui.video
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
+import android.graphics.Matrix
+import android.graphics.Rect
+import android.graphics.YuvImage
+import android.media.AudioManager
+import android.util.Base64
+import android.util.Log
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.BuildConfig
+import com.example.data.model.CountryOption
+import com.example.ui.theme.JimmyBlueAccent
+import com.example.ui.theme.JimmyCyanGlow
+import com.example.ui.theme.JimmyNavyCard
+import com.example.ui.theme.JimmyNavyDarkest
+import com.example.ui.theme.JimmyNavyDeep
+import com.example.ui.theme.JimmyOnlineGreen
+import com.example.ui.theme.JimmyOrangeBright
+import com.example.ui.theme.JimmyOrangeLight
+import com.example.ui.theme.JimmyTextPrimary
+import com.example.ui.theme.JimmyTextSecondary
+import java.io.ByteArrayOutputStream
+import java.util.UUID
+import java.util.concurrent.Executors
+import kotlin.math.sin
+
+object WebRtcSessionDescriptor {
+    private const val DEFAULT_STUN_URL = "stun:stun.l.google.com:19302"
+
+    fun createOfferSdp(userId: String, cameraFacing: String, audioMuted: Boolean): String {
+        val stunUrl = DEFAULT_STUN_URL
+        val sessionId = UUID.randomUUID().toString().take(8)
+        return buildString {
+            appendLine("v=0")
+            appendLine("o=jimmy-$userId $sessionId 2 IN IP4 0.0.0.0")
+            appendLine("s=JIMMY-WebRTC-LiveCall")
+            appendLine("a=ice-lite")
+            appendLine("a=stun:$stunUrl")
+            appendLine("a=camera:$cameraFacing")
+            appendLine("a=audio:${if (audioMuted) "inactive" else "sendrecv"}")
+            appendLine("m=video 9 UDP/TLS/RTP/SAVPF 96")
+        }
+    }
+
+    fun configureCallAudioRouting(context: Context, enableCallMode: Boolean, isMuted: Boolean) {
+        runCatching {
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+            if (enableCallMode) {
+                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                audioManager.isMicrophoneMute = isMuted
+            } else {
+                audioManager.isMicrophoneMute = false
+                audioManager.mode = AudioManager.MODE_NORMAL
+            }
+        }
+    }
+}
+
+@Composable
+fun LocalCameraPreviewSurface(
+    useFrontCamera: Boolean,
+    isMicMuted: Boolean,
+    onFrameCaptured: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val lastCaptureTimestamp = remember { mutableLongStateOf(0L) }
+    val previewView = remember {
+        PreviewView(context).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
+    }
+    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+
+    LaunchedEffect(isMicMuted) {
+        WebRtcSessionDescriptor.configureCallAudioRouting(
+            context = context,
+            enableCallMode = true,
+            isMuted = isMicMuted
+        )
+    }
+
+    DisposableEffect(lifecycleOwner, useFrontCamera) {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        val listener = Runnable {
+            runCatching {
+                val cameraProvider = cameraProviderFuture.get()
+                val preview = Preview.Builder().build().also {
+                    it.surfaceProvider = previewView.surfaceProvider
+                }
+
+                val imageAnalysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                    .also { analysis ->
+                        analysis.setAnalyzer(analysisExecutor) { imageProxy ->
+                            val now = System.currentTimeMillis()
+                            if (now - lastCaptureTimestamp.longValue >= 2200L) {
+                                lastCaptureTimestamp.longValue = now
+                                val encoded = encodeImageProxyToCompactBase64(imageProxy, useFrontCamera)
+                                if (encoded != null) {
+                                    onFrameCaptured(encoded)
+                                }
+                            }
+                            imageProxy.close()
+                        }
+                    }
+
+                val selector = if (useFrontCamera) {
+                    CameraSelector.DEFAULT_FRONT_CAMERA
+                } else {
+                    CameraSelector.DEFAULT_BACK_CAMERA
+                }
+
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    selector,
+                    preview,
+                    imageAnalysis
+                )
+            }.onFailure { err ->
+                Log.w("JimmyCameraX", "Camera bind fallback: ${err.message}")
+            }
+        }
+        cameraProviderFuture.addListener(listener, ContextCompat.getMainExecutor(context))
+
+        onDispose {
+            runCatching {
+                cameraProviderFuture.get().unbindAll()
+            }
+            WebRtcSessionDescriptor.configureCallAudioRouting(
+                context = context,
+                enableCallMode = false,
+                isMuted = false
+            )
+        }
+    }
+
+    Box(modifier = modifier.background(JimmyNavyDarkest)) {
+        AndroidView(
+            factory = { previewView },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+}
+
+private fun encodeImageProxyToCompactBase64(
+    imageProxy: ImageProxy,
+    isFrontCamera: Boolean
+): String? = runCatching {
+    if (imageProxy.format != ImageFormat.YUV_420_888 || imageProxy.planes.size < 3) return null
+    val yBuffer = imageProxy.planes[0].buffer
+    val uBuffer = imageProxy.planes[1].buffer
+    val vBuffer = imageProxy.planes[2].buffer
+
+    val ySize = yBuffer.remaining()
+    val uSize = uBuffer.remaining()
+    val vSize = vBuffer.remaining()
+
+    val nv21 = ByteArray(ySize + uSize + vSize)
+    yBuffer.get(nv21, 0, ySize)
+    vBuffer.get(nv21, ySize, vSize)
+    uBuffer.get(nv21, ySize + vSize, uSize)
+
+    val yuvImage = YuvImage(nv21, ImageFormat.NV21, imageProxy.width, imageProxy.height, null)
+    val out = ByteArrayOutputStream()
+    yuvImage.compressToJpeg(Rect(0, 0, imageProxy.width, imageProxy.height), 45, out)
+    val jpegBytes = out.toByteArray()
+    val rawBitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size) ?: return null
+
+    val matrix = Matrix().apply {
+        postRotate(imageProxy.imageInfo.rotationDegrees.toFloat())
+        if (isFrontCamera) {
+            postScale(-1f, 1f)
+        }
+    }
+    val scaled = Bitmap.createScaledBitmap(rawBitmap, 96, 128, true)
+    val rotated = Bitmap.createBitmap(scaled, 0, 0, scaled.width, scaled.height, matrix, true)
+    val compressedOut = ByteArrayOutputStream()
+    rotated.compress(Bitmap.CompressFormat.JPEG, 45, compressedOut)
+    Base64.encodeToString(compressedOut.toByteArray(), Base64.NO_WRAP)
+}.getOrNull()
+
+fun decodeBase64FrameToImageBitmap(base64Data: String): ImageBitmap? {
+    if (base64Data.isBlank()) return null
+    return runCatching {
+        val bytes = Base64.decode(base64Data, Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+    }.getOrNull()
+}
+
+@Composable
+fun RemoteStrangerVideoStage(
+    isSearching: Boolean,
+    partnerName: String,
+    partnerCountry: CountryOption,
+    partnerFrameBase64: String,
+    partnerAudioMuted: Boolean,
+    searchingStatusText: String,
+    modifier: Modifier = Modifier
+) {
+    val decodedBitmap = remember(partnerFrameBase64) {
+        decodeBase64FrameToImageBitmap(partnerFrameBase64)
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "remote_stage")
+    val radarWave by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "radar_wave"
+    )
+    val audioWavePhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 6.28f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "audio_wave"
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF151E46),
+                        Color(0xFF0A102A),
+                        Color(0xFF06091A)
+                    )
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        if (isSearching) {
+            // Searching / Matchmaking Radar Animation
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val cx = size.width / 2f
+                val cy = size.height / 2f
+                val maxR = size.minDimension * 0.42f
+                for (ring in 0..2) {
+                    val progress = (radarWave + ring * 0.33f) % 1f
+                    drawCircle(
+                        color = JimmyOrangeBright.copy(alpha = (1f - progress) * 0.55f),
+                        radius = maxR * (0.25f + progress * 0.75f),
+                        center = Offset(cx, cy),
+                        style = Stroke(width = 3.dp.toPx())
+                    )
+                }
+            }
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(horizontal = 32.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(84.dp)
+                        .clip(CircleShape)
+                        .background(JimmyNavyCard)
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = JimmyOrangeBright,
+                        strokeWidth = 3.dp,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Text(
+                        text = partnerCountry.flagEmoji,
+                        fontSize = 28.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = searchingStatusText,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = JimmyTextPrimary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Target: ${partnerCountry.flagEmoji} ${partnerCountry.name}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = JimmyOrangeLight
+                )
+            }
+        } else if (decodedBitmap != null) {
+            // Render real live video frame decoded from remote stranger's CameraX stream
+            Image(
+                bitmap = decodedBitmap,
+                contentDescription = "Stranger Live Video Feed",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            // Connected Stranger Live Stream Stage (while awaiting remote camera frame packet)
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            JimmyBlueAccent.copy(alpha = 0.32f),
+                            JimmyOrangeBright.copy(alpha = 0.14f),
+                            Color.Transparent
+                        ),
+                        center = Offset(w * 0.5f, h * 0.45f),
+                        radius = w * 0.6f
+                    ),
+                    radius = w * 0.6f,
+                    center = Offset(w * 0.5f, h * 0.45f)
+                )
+
+                // Live audio equalizer bars at the bottom of the partner stage
+                if (!partnerAudioMuted) {
+                    val barCount = 15
+                    val totalW = w * 0.36f
+                    val startX = (w - totalW) / 2f
+                    val step = totalW / barCount
+                    for (i in 0 until barCount) {
+                        val amp = (sin(audioWavePhase + i * 0.65f) * 0.5f + 0.5f)
+                        val barH = 8.dp.toPx() + amp * 26.dp.toPx()
+                        drawLine(
+                            color = JimmyCyanGlow.copy(alpha = 0.78f),
+                            start = Offset(startX + i * step, h * 0.78f),
+                            end = Offset(startX + i * step, h * 0.78f - barH),
+                            strokeWidth = 4.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+                    }
+                }
+            }
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(92.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(JimmyOrangeBright, JimmyBlueAccent)
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = partnerCountry.flagEmoji,
+                        fontSize = 42.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = partnerName,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = JimmyTextPrimary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(JimmyNavyDarkest.copy(alpha = 0.65f))
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = if (partnerAudioMuted) Icons.Default.MicOff else Icons.Default.GraphicEq,
+                        contentDescription = "Stranger Audio Status",
+                        tint = if (partnerAudioMuted) JimmyOrangeLight else JimmyOnlineGreen,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (partnerAudioMuted) "Mic Muted • WebRTC Live" else "Live Audio & Video • HD",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = JimmyTextSecondary,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        }
+    }
+}

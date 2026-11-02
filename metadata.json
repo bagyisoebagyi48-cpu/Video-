@@ -1,0 +1,6 @@
+{
+  "name": "JIMMY",
+  "description": "Meet The World – Real-time random video chat and live messaging across countries.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

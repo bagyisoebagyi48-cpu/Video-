@@ -1,0 +1,28 @@
+<resources>
+    <string name="app_name">JIMMY</string>
+    <string name="tagline_meet_the_world">Meet The World</string>
+    <string name="subtitle_random_video_chat">Random Video Chat</string>
+    <string name="subtitle_meet_people">Meet People Around The World ❤️</string>
+    <string name="loading_status">Loading...</string>
+    <string name="your_country_label">Your Country</string>
+    <string name="connect_with_label">Connect with</string>
+    <string name="popular_countries_label">Popular Countries</string>
+    <string name="start_video_chat">Start Video Chat</string>
+    <string name="age_restriction_notice">You must be 18+ to use this app</string>
+    <string name="sign_in_with_google">Sign in with Google</string>
+    <string name="search_country_hint">Search country or region...</string>
+    <string name="type_message_hint">Type a message...</string>
+    <string name="chat_button_label">Chat</string>
+    <string name="next_button_label">Next</string>
+    <string name="icebreaker_button_label">Wave</string>
+    <string name="searching_for_stranger">Searching for a stranger...</string>
+    <string name="waiting_for_stranger">Waiting for an available partner in selected country...</string>
+    <string name="report_or_block_title">Safety &amp; Moderation</string>
+    <string name="report_user_action">Report User &amp; End Call</string>
+    <string name="block_user_action">Block User &amp; End Call</string>
+    <string name="terms_of_service">Terms of Service</string>
+    <string name="privacy_policy">Privacy Policy</string>
+    <string name="camera_mic_permission_title">Camera &amp; Microphone Access</string>
+    <string name="camera_mic_permission_body">JIMMY needs camera and microphone permissions for real-time two-way video and audio calls.</string>
+    <string name="grant_permissions">Grant Permissions</string>
+</resources>
