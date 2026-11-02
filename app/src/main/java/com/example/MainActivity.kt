@@ -32,8 +32,8 @@ import com.google.firebase.auth.FirebaseAuth
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        ensureFirebaseInitialized(this)
         super.onCreate(savedInstanceState)
+        runCatching { ensureFirebaseInitialized(this) }
         runCatching { enableEdgeToEdge() }
         setContent {
             MyApplicationTheme {
@@ -52,7 +52,8 @@ fun JimmyAppRoot(authOverride: FirebaseAuth? = null) {
 
     var showSplash by rememberSaveable { mutableStateOf(true) }
     val authFlow = remember(auth) { auth.authStateFlow() }
-    val currentUser by authFlow.collectAsStateWithLifecycle(initialValue = auth?.currentUser)
+    val initialUser = remember(auth) { runCatching { auth?.currentUser }.getOrNull() }
+    val currentUser by authFlow.collectAsStateWithLifecycle(initialValue = initialUser)
 
     // Pre-auth local country selection state so the Welcome screen is interactive immediately
     var guestYourCountry by remember { mutableStateOf(CountryCatalog.detectDeviceCountry()) }

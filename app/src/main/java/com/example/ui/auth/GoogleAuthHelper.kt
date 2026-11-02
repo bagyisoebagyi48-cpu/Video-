@@ -42,12 +42,12 @@ tailrec fun Context.findActivity(): Activity? = when (this) {
 
 fun ensureFirebaseInitialized(context: Context): Boolean {
     return try {
-        if (runCatching { FirebaseApp.getInstance() }.getOrNull() != null) {
+        val appContext = context.applicationContext ?: context
+        if (FirebaseApp.getApps(appContext).isNotEmpty()) {
             return true
         }
-        val appContext = context.applicationContext ?: context
         val defaultInit = runCatching { FirebaseApp.initializeApp(appContext) }.getOrNull()
-        if (defaultInit != null || runCatching { FirebaseApp.getInstance() }.getOrNull() != null) {
+        if (defaultInit != null || FirebaseApp.getApps(appContext).isNotEmpty()) {
             return true
         }
         // Fallback initialization when google-services resources are not auto-loaded
@@ -60,7 +60,7 @@ fun ensureFirebaseInitialized(context: Context): Boolean {
             .setGcmSenderId("537576131373")
             .setStorageBucket("gen-lang-client-0725848915.firebasestorage.app")
             .build()
-        FirebaseApp.initializeApp(appContext, fallbackOptions)
+        runCatching { FirebaseApp.initializeApp(appContext, fallbackOptions) }
         true
     } catch (t: Throwable) {
         Log.e(AUTH_TAG, "Failed to initialize FirebaseApp", t)

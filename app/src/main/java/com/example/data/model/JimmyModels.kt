@@ -73,9 +73,12 @@ object CountryCatalog {
     }
 
     fun detectDeviceCountry(): CountryOption {
-        val localeCountry = Locale.getDefault().country.uppercase(Locale.ROOT)
-        return COUNTRIES.find { it.code == localeCountry }
-            ?: COUNTRIES.first { it.code == "MM" }
+        val localeCountry = runCatching {
+            Locale.getDefault().country?.uppercase(Locale.ROOT)
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: "MM"
+        return COUNTRIES.find { it.code.equals(localeCountry, ignoreCase = true) }
+            ?: COUNTRIES.firstOrNull { it.code == "MM" }
+            ?: ALL_COUNTRIES
     }
 }
 

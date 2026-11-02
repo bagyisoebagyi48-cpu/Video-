@@ -186,7 +186,6 @@ fun JimmyLogoHeader(
                             color = JimmyOrangeBright,
                             fontFamily = OutfitFontFamily,
                             fontWeight = FontWeight.Bold,
-                            fontStyle = FontStyle.Italic,
                             fontSize = if (showVideoBubbleIcon) 54.sp else 46.sp
                         )
                     ) {
@@ -197,7 +196,6 @@ fun JimmyLogoHeader(
                             color = JimmyTextPrimary,
                             fontFamily = OutfitFontFamily,
                             fontWeight = FontWeight.Bold,
-                            fontStyle = FontStyle.Italic,
                             fontSize = if (showVideoBubbleIcon) 52.sp else 44.sp
                         )
                     ) {
