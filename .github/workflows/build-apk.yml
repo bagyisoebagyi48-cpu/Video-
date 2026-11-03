@@ -57,35 +57,37 @@ jobs:
         with:
           gradle-version: '8.12.1'
 
-      - name: Build Debug APK
+      - name: Build Fresh Debug APK
         run: |
           mkdir -p dist
-          if [ -f .build-outputs/app-debug.apk ]; then
-            echo "Using verified pre-built signed APK..."
-            cp .build-outputs/app-debug.apk dist/JIMMY-Meet-The-World.apk
-          else
-            echo "Normalizing version catalog for public Google Maven on GitHub Actions runner..."
-            sed -i 's/agp = ".*"/agp = "8.8.0"/' gradle/libs.versions.toml
-            sed -i 's/kotlin = ".*"/kotlin = "2.1.0"/' gradle/libs.versions.toml
-            sed -i 's/googleDevtoolsKsp = ".*"/googleDevtoolsKsp = "2.1.0-1.0.29"/' gradle/libs.versions.toml
-            sed -i 's/coreKtx = ".*"/coreKtx = "1.16.0"/' gradle/libs.versions.toml
-            sed -i 's/cameraCamera2 = ".*"/cameraCamera2 = "1.4.1"/' gradle/libs.versions.toml
-            sed -i 's/cameraLifecycle = ".*"/cameraLifecycle = "1.4.1"/' gradle/libs.versions.toml
-            sed -i 's/cameraView = ".*"/cameraView = "1.4.1"/' gradle/libs.versions.toml
-            sed -i 's/cameraCore = ".*"/cameraCore = "1.4.1"/' gradle/libs.versions.toml
-            sed -i 's/compileSdk { version = release(36) { minorApiLevel = 1 } }/compileSdk = 35/' app/build.gradle.kts
-            sed -i 's/targetSdk = .*/targetSdk = 35/' app/build.gradle.kts
+          echo "Normalizing version catalog for public Google Maven on GitHub Actions runner..."
+          sed -i 's/agp = ".*"/agp = "8.8.0"/' gradle/libs.versions.toml
+          sed -i 's/kotlin = ".*"/kotlin = "2.1.0"/' gradle/libs.versions.toml
+          sed -i 's/googleDevtoolsKsp = ".*"/googleDevtoolsKsp = "2.1.0-1.0.29"/' gradle/libs.versions.toml
+          sed -i 's/coreKtx = ".*"/coreKtx = "1.16.0"/' gradle/libs.versions.toml
+          sed -i 's/cameraCamera2 = ".*"/cameraCamera2 = "1.4.1"/' gradle/libs.versions.toml
+          sed -i 's/cameraLifecycle = ".*"/cameraLifecycle = "1.4.1"/' gradle/libs.versions.toml
+          sed -i 's/cameraView = ".*"/cameraView = "1.4.1"/' gradle/libs.versions.toml
+          sed -i 's/cameraCore = ".*"/cameraCore = "1.4.1"/' gradle/libs.versions.toml
+          sed -i 's/compileSdk { version = release(36) { minorApiLevel = 1 } }/compileSdk = 35/' app/build.gradle.kts
+          sed -i 's/targetSdk = .*/targetSdk = 35/' app/build.gradle.kts
 
-            gradle assembleDebug --no-daemon
-            cp app/build/outputs/apk/debug/app-debug.apk dist/JIMMY-Meet-The-World.apk
+          echo "Executing clean assembleDebug build..."
+          gradle clean assembleDebug --no-daemon --stacktrace
+
+          if [ ! -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            echo "ERROR: app/build/outputs/apk/debug/app-debug.apk was not generated!"
+            exit 1
           fi
-          ls -lh dist/JIMMY-Meet-The-World.apk
+
+          cp app/build/outputs/apk/debug/app-debug.apk dist/JIMMY-Meet-The-World.apk
+          ls -lh app/build/outputs/apk/debug/app-debug.apk dist/JIMMY-Meet-The-World.apk
 
       - name: Upload JIMMY APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: JIMMY-Meet-The-World-APK
-          path: dist/JIMMY-Meet-The-World.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
       - name: Publish APK to GitHub Releases

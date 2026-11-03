@@ -17,10 +17,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.example.data.model.CountryCatalog
 import com.example.data.repository.JimmyRepository
 import com.example.ui.auth.GuestSessionManager
+import com.example.ui.diagnostics.CrashDiagnostics
+import com.example.ui.diagnostics.CrashReport
 import com.example.ui.screens.SplashScreen
+import com.example.ui.screens.StartupDiagnosticsScreen
 import com.example.ui.screens.VideoChatScreen
 import com.example.ui.screens.WelcomeScreen
 import com.example.ui.theme.MyApplicationTheme
@@ -28,13 +30,63 @@ import com.example.ui.viewmodel.ActiveAppScreen
 import com.example.ui.viewmodel.JimmyViewModel
 
 class MainActivity : ComponentActivity() {
+
+    private var activeCrashReport by mutableStateOf<CrashReport?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.i(TAG, "MainActivity.onCreate starting...")
         runCatching { enableEdgeToEdge() }
-        setContent {
-            MyApplicationTheme {
-                JimmyAppRoot()
+
+        try {
+            setContent {
+                MyApplicationTheme {
+                    val report = activeCrashReport
+                    if (report != null) {
+                        StartupDiagnosticsScreen(
+                            report = report,
+                            onRetry = {
+                                CrashDiagnostics.clearLastCrash(this@MainActivity)
+                                activeCrashReport = null
+                                recreate()
+                            },
+                            onResetData = {
+                                CrashDiagnostics.clearAllData(this@MainActivity)
+                                activeCrashReport = null
+                                recreate()
+                            }
+                        )
+                    } else {
+                        JimmyAppRoot(
+                            onFatalError = { error ->
+                                Log.e(TAG, "Fatal Compose error captured", error)
+                                CrashDiagnostics.recordCrash(this@MainActivity, Thread.currentThread(), error)
+                                activeCrashReport = CrashDiagnostics.readLastCrash(this@MainActivity)
+                            }
+                        )
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "Uncaught exception in MainActivity.onCreate", t)
+            CrashDiagnostics.recordCrash(this, Thread.currentThread(), t)
+            val report = CrashDiagnostics.readLastCrash(this)
+            setContent {
+                MyApplicationTheme {
+                    if (report != null) {
+                        StartupDiagnosticsScreen(
+                            report = report,
+                            onRetry = {
+                                CrashDiagnostics.clearLastCrash(this@MainActivity)
+                                recreate()
+                            },
+                            onResetData = {
+                                CrashDiagnostics.clearAllData(this@MainActivity)
+                                recreate()
+                            }
+                        )
+                    }
+                }
             }
         }
     }
@@ -45,12 +97,20 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun JimmyAppRoot() {
+fun JimmyAppRoot(
+    onFatalError: (Throwable) -> Unit = {}
+) {
     val context = LocalContext.current
     var showSplash by rememberSaveable { mutableStateOf(true) }
 
-    val guestUserId = remember(context) { GuestSessionManager.getOrCreateUserId(context) }
-    val displayName = remember(context) { GuestSessionManager.getDisplayName(context) }
+    val guestUserId = remember(context) {
+        runCatching { GuestSessionManager.getOrCreateUserId(context) }
+            .getOrDefault("jimmy_guest_default")
+    }
+    val displayName = remember(context) {
+        runCatching { GuestSessionManager.getDisplayName(context) }
+            .getOrDefault("Jimmy Explorer")
+    }
 
     if (showSplash) {
         SplashScreen(
@@ -66,11 +126,20 @@ fun JimmyAppRoot() {
         factory = viewModelFactory {
             initializer {
                 val resolvedContext = this[APPLICATION_KEY] ?: appContext
-                JimmyViewModel(
-                    repository = JimmyRepository(resolvedContext),
-                    currentUserId = guestUserId,
-                    initialDisplayName = displayName
-                )
+                try {
+                    JimmyViewModel(
+                        repository = JimmyRepository(resolvedContext),
+                        currentUserId = guestUserId,
+                        initialDisplayName = displayName
+                    )
+                } catch (t: Throwable) {
+                    onFatalError(t)
+                    JimmyViewModel(
+                        repository = JimmyRepository(defaultUserId = guestUserId),
+                        currentUserId = guestUserId,
+                        initialDisplayName = displayName
+                    )
+                }
             }
         }
     )
