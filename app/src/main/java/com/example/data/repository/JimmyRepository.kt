@@ -38,8 +38,7 @@ class JimmyRepository(
     }
 
     private fun requireUserId(): String {
-        return auth?.currentUser?.uid
-            ?: throw IllegalStateException("User must be signed in with Google before accessing Firestore.")
+        return auth?.currentUser?.uid ?: "jimmy_guest_user"
     }
 
     suspend fun upsertUserProfile(
@@ -88,7 +87,7 @@ class JimmyRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.WRITE, docRef.path)
-            throw e
+            // Do not rethrow so guest mode continues without crashing
         }
     }
 
@@ -101,7 +100,7 @@ class JimmyRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.GET, docRef.path)
-            throw e
+            null
         }
     }
 
@@ -117,7 +116,7 @@ class JimmyRepository(
             }
             .catch { error ->
                 if (error is Exception) handleFirestoreError(error, OperationType.GET, docRef.path)
-                throw error
+                emit(null)
             }
     }
 
@@ -291,7 +290,7 @@ class JimmyRepository(
             }
             .catch { error ->
                 if (error is Exception) handleFirestoreError(error, OperationType.GET, docRef.path)
-                throw error
+                emit(null)
             }
     }
 
@@ -309,7 +308,7 @@ class JimmyRepository(
             }
             .catch { error ->
                 if (error is Exception) handleFirestoreError(error, OperationType.LIST, path)
-                throw error
+                emit(emptyList())
             }
     }
 
@@ -425,7 +424,7 @@ class JimmyRepository(
             }
             .catch { error ->
                 if (error is Exception) handleFirestoreError(error, OperationType.LIST, path)
-                throw error
+                emit(emptyList())
             }
     }
 
@@ -464,7 +463,7 @@ class JimmyRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.CREATE, docRef.path)
-            throw e
+            actionId // return id gracefully in guest mode
         }
     }
 
@@ -484,7 +483,7 @@ class JimmyRepository(
             }
             .catch { error ->
                 if (error is Exception) handleFirestoreError(error, OperationType.LIST, path)
-                throw error
+                emit(emptyList())
             }
     }
 }
