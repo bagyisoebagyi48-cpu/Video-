@@ -55,7 +55,7 @@ fun ensureFirebaseInitialized(context: Context): Boolean {
         val keySuffix = "QK625qKN8pHW3eoX6uw"
         val fallbackOptions = FirebaseOptions.Builder()
             .setProjectId("gen-lang-client-0725848915")
-            .setApplicationId("1:537576131373:android:4115de3a99381a624721a4")
+            .setApplicationId("1:537576131373:android:b4be6526ee8b38744721a4")
             .setApiKey(keyPrefix + keySuffix)
             .setGcmSenderId("537576131373")
             .setStorageBucket("gen-lang-client-0725848915.firebasestorage.app")

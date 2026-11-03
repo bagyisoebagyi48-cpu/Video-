@@ -11,21 +11,19 @@ import com.example.R
 
 val OutfitFontFamily: FontFamily = runCatching {
     FontFamily(
-        Font(
-            resId = R.font.outfit,
-            weight = FontWeight.Normal,
-            loadingStrategy = FontLoadingStrategy.OptionalLocal
-        )
+        Font(resId = R.font.outfit, weight = FontWeight.Normal),
+        Font(resId = R.font.outfit, weight = FontWeight.Medium),
+        Font(resId = R.font.outfit, weight = FontWeight.SemiBold),
+        Font(resId = R.font.outfit, weight = FontWeight.Bold)
     )
 }.getOrDefault(FontFamily.SansSerif)
 
 val PlusJakartaFontFamily: FontFamily = runCatching {
     FontFamily(
-        Font(
-            resId = R.font.plus_jakarta_sans,
-            weight = FontWeight.Normal,
-            loadingStrategy = FontLoadingStrategy.OptionalLocal
-        )
+        Font(resId = R.font.plus_jakarta_sans, weight = FontWeight.Normal),
+        Font(resId = R.font.plus_jakarta_sans, weight = FontWeight.Medium),
+        Font(resId = R.font.plus_jakarta_sans, weight = FontWeight.SemiBold),
+        Font(resId = R.font.plus_jakarta_sans, weight = FontWeight.Bold)
     )
 }.getOrDefault(FontFamily.Default)
 
