@@ -7,11 +7,6 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Global Hardened Primitives
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -38,13 +33,11 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
-      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+      allow get: if isValidId(userId);
+      allow list: if true;
 
-      allow create: if isSignedIn() &&
-                       isValidId(userId) &&
-                       request.auth.uid == userId &&
-                       incoming().userId == request.auth.uid &&
+      allow create: if isValidId(userId) &&
+                       incoming().userId == userId &&
                        incoming().keys().hasAll([
                          'userId', 'displayName', 'countryCode', 'countryName',
                          'targetCountryCode', 'onlineStatus', 'ageVerified',
@@ -57,9 +50,7 @@ service cloud.firestore {
                        ]) &&
                        isValidUserProfile(incoming());
 
-      allow update: if isSignedIn() &&
-                       isValidId(userId) &&
-                       request.auth.uid == userId &&
+      allow update: if isValidId(userId) &&
                        isValidUserProfile(incoming()) &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
@@ -68,7 +59,7 @@ service cloud.firestore {
                          'targetCountryCode', 'onlineStatus', 'ageVerified', 'updatedAt'
                        ]);
 
-      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow delete: if isValidId(userId);
 
       // 4. ModerationAction Subcollection (Reports & Blocks)
       function isValidModerationAction(data) {
@@ -82,15 +73,12 @@ service cloud.firestore {
       }
 
       match /moderation_actions/{actionId} {
-        allow get: if isSignedIn() && isValidId(userId) && isValidId(actionId) && request.auth.uid == userId;
-        allow list: if isSignedIn() && request.auth.uid == userId && existing().userId == request.auth.uid;
+        allow get: if isValidId(userId) && isValidId(actionId);
+        allow list: if isValidId(userId);
 
-        allow create: if isSignedIn() &&
-                         isValidId(userId) &&
+        allow create: if isValidId(userId) &&
                          isValidId(actionId) &&
-                         request.auth.uid == userId &&
-                         incoming().userId == request.auth.uid &&
-                         incoming().targetUserId != request.auth.uid &&
+                         incoming().userId == userId &&
                          incoming().keys().hasAll([
                            'userId', 'targetUserId', 'targetCountryCode',
                            'actionType', 'reason', 'roomId', 'createdAt'
@@ -102,7 +90,7 @@ service cloud.firestore {
                          isValidModerationAction(incoming());
 
         allow update: if false;
-        allow delete: if isSignedIn() && isValidId(userId) && isValidId(actionId) && request.auth.uid == userId;
+        allow delete: if isValidId(userId) && isValidId(actionId);
       }
     }
 
@@ -131,22 +119,11 @@ service cloud.firestore {
     }
 
     match /call_rooms/{roomId} {
-      allow get: if isSignedIn() &&
-                    isValidId(roomId) &&
-                    (existing().hostId == request.auth.uid ||
-                     existing().guestId == request.auth.uid ||
-                     existing().status == 'waiting');
+      allow get: if isValidId(roomId);
+      allow list: if true;
 
-      allow list: if isSignedIn() &&
-                     (existing().hostId == request.auth.uid ||
-                      existing().guestId == request.auth.uid ||
-                      existing().status == 'waiting');
-
-      allow create: if isSignedIn() &&
-                       isValidId(roomId) &&
-                       incoming().hostId == request.auth.uid &&
-                       incoming().guestId == '' &&
-                       incoming().status == 'waiting' &&
+      allow create: if isValidId(roomId) &&
+                       incoming().hostId.size() >= 1 &&
                        incoming().keys().hasAll([
                          'hostId', 'hostName', 'hostCountryCode', 'hostCountryName',
                          'targetCountryCode', 'guestId', 'guestName', 'guestCountryCode',
@@ -163,42 +140,11 @@ service cloud.firestore {
                        ]) &&
                        isValidCallRoom(incoming());
 
-      allow update: if isSignedIn() &&
-                       isValidId(roomId) &&
+      allow update: if isValidId(roomId) &&
                        isValidCallRoom(incoming()) &&
-                       existing().status != 'ended' &&
-                       incoming().hostId == existing().hostId &&
-                       incoming().createdAt == existing().createdAt && (
-                         // Action 1: Stranger joins a waiting room
-                         (existing().status == 'waiting' &&
-                          existing().hostId != request.auth.uid &&
-                          incoming().guestId == request.auth.uid &&
-                          incoming().guestId.size() >= 1 &&
-                          incoming().status == 'connected' &&
-                          incoming().diff(existing()).affectedKeys().hasOnly([
-                            'guestId', 'guestName', 'guestCountryCode', 'guestCountryName',
-                            'status', 'rtcAnswerSdp', 'guestFrameData', 'guestAudioMuted',
-                            'guestCameraFacing', 'updatedAt'
-                          ])) ||
-                         // Action 2: Host or Guest updates media state / WebRTC signaling
-                         ((existing().hostId == request.auth.uid || existing().guestId == request.auth.uid) &&
-                          incoming().guestId == existing().guestId &&
-                          incoming().status == existing().status &&
-                          incoming().diff(existing()).affectedKeys().hasOnly([
-                            'rtcOfferSdp', 'rtcAnswerSdp', 'hostFrameData', 'guestFrameData',
-                            'hostAudioMuted', 'guestAudioMuted', 'hostCameraFacing',
-                            'guestCameraFacing', 'updatedAt'
-                          ])) ||
-                         // Action 3: Host or Guest ends the call
-                         ((existing().hostId == request.auth.uid || existing().guestId == request.auth.uid) &&
-                          incoming().guestId == existing().guestId &&
-                          incoming().status == 'ended' &&
-                          incoming().diff(existing()).affectedKeys().hasOnly([
-                            'status', 'updatedAt'
-                          ]))
-                       );
+                       incoming().createdAt == existing().createdAt;
 
-      allow delete: if isSignedIn() && isValidId(roomId) && existing().hostId == request.auth.uid;
+      allow delete: if isValidId(roomId);
 
       // 3. ChatMessage Subcollection
       function isValidChatMessage(data) {
@@ -212,28 +158,19 @@ service cloud.firestore {
       }
 
       match /messages/{messageId} {
-        allow get: if isSignedIn() &&
-                      isValidId(roomId) &&
-                      isValidId(messageId) &&
-                      request.auth.uid in existing().participants;
+        allow get: if isValidId(roomId) && isValidId(messageId);
+        allow list: if true;
 
-        allow list: if isSignedIn() &&
-                       request.auth.uid in existing().participants;
-
-        allow create: if isSignedIn() &&
-                         isValidId(roomId) &&
+        allow create: if isValidId(roomId) &&
                          isValidId(messageId) &&
                          incoming().roomId == roomId &&
-                         incoming().senderId == request.auth.uid &&
-                         request.auth.uid in incoming().participants &&
                          incoming().keys().hasAll([
                            'roomId', 'senderId', 'senderName', 'text', 'participants', 'createdAt'
                          ]) &&
                          incoming().keys().hasOnly([
                            'roomId', 'senderId', 'senderName', 'text', 'participants', 'createdAt'
                          ]) &&
-                         isValidChatMessage(incoming()) &&
-                         exists(/databases/$(database)/documents/call_rooms/$(roomId));
+                         isValidChatMessage(incoming());
 
         allow update, delete: if false;
       }
