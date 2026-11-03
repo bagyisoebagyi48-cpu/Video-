@@ -3,15 +3,11 @@ package com.example
 import android.content.Context
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.model.CallRoom
 import com.example.data.model.ChatMessage
 import com.example.data.model.CountryCatalog
-import com.example.ui.auth.ensureFirebaseInitialized
-import com.example.ui.auth.getSafeFirebaseAuth
-import com.example.ui.auth.getSafeFirestore
+import com.example.ui.auth.GuestSessionManager
 import com.example.ui.viewmodel.ActiveAppScreen
 import com.example.ui.viewmodel.JimmyUiState
 import com.example.ui.viewmodel.MatchmakingState
@@ -32,13 +28,16 @@ class ExampleRobolectricTest {
     val composeTestRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun `launch MainActivity transition Splash to Welcome interact with sheets and survive recreation`() {
+    fun `launch MainActivity transition Splash to Welcome without Firebase and survive recreation`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appName = context.getString(R.string.app_name)
         assertEquals("JIMMY", appName)
-        assertTrue(ensureFirebaseInitialized(context))
-        assertNotNull(getSafeFirebaseAuth(context))
-        assertNotNull(getSafeFirestore(context))
+
+        // Verify standalone guest session is ready immediately without network or Firebase
+        val guestSession = GuestSessionManager.getOrCreateSession(context)
+        assertNotNull(guestSession)
+        assertTrue(guestSession.userId.startsWith("jimmy_guest_"))
+        assertTrue(guestSession.displayName.startsWith("Guest #"))
 
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("splash_screen").assertExists()
@@ -49,7 +48,8 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("welcome_screen").assertExists()
         composeTestRule.onNodeWithTag("your_country_selector").assertExists()
         composeTestRule.onNodeWithTag("connect_with_selector").assertExists()
-        composeTestRule.onNodeWithTag("google_sign_in_button").assertExists()
+        composeTestRule.onNodeWithTag("start_video_chat_button").assertExists()
+        composeTestRule.onNodeWithTag("age_verification_toggle").assertExists()
         composeTestRule.onNodeWithTag("popular_country_TH").assertExists()
 
         // Verify VideoChatScreen states (Searching and Connected) construct cleanly

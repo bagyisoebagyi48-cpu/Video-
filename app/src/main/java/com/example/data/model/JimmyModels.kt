@@ -1,9 +1,5 @@
 package com.example.data.model
 
-import com.google.firebase.Timestamp
-import com.google.firebase.firestore.DocumentId
-import com.google.firebase.firestore.IgnoreExtraProperties
-import com.google.firebase.firestore.ServerTimestamp
 import java.util.Locale
 
 data class CountryOption(
@@ -82,9 +78,27 @@ object CountryCatalog {
     }
 }
 
-@IgnoreExtraProperties
+data class JimmyTimestamp(
+    val seconds: Long = System.currentTimeMillis() / 1000,
+    val nanoseconds: Int = 0
+) : Comparable<JimmyTimestamp> {
+    override fun compareTo(other: JimmyTimestamp): Int {
+        val secCmp = seconds.compareTo(other.seconds)
+        return if (secCmp != 0) secCmp else nanoseconds.compareTo(other.nanoseconds)
+    }
+
+    fun toDate(): java.util.Date = java.util.Date(seconds * 1000L + (nanoseconds / 1_000_000L))
+
+    companion object {
+        fun now(): JimmyTimestamp {
+            val nowMs = System.currentTimeMillis()
+            return JimmyTimestamp(seconds = nowMs / 1000, nanoseconds = ((nowMs % 1000) * 1_000_000).toInt())
+        }
+    }
+}
+
 data class UserProfile(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val userId: String = "",
     val displayName: String = "",
     val countryCode: String = "MM",
@@ -92,13 +106,12 @@ data class UserProfile(
     val targetCountryCode: String = "ALL",
     val onlineStatus: String = "online",
     val ageVerified: Boolean = true,
-    @ServerTimestamp val createdAt: Timestamp? = null,
-    @ServerTimestamp val updatedAt: Timestamp? = null
+    val createdAt: JimmyTimestamp? = null,
+    val updatedAt: JimmyTimestamp? = null
 )
 
-@IgnoreExtraProperties
 data class CallRoom(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val hostId: String = "",
     val hostName: String = "",
     val hostCountryCode: String = "MM",
@@ -117,8 +130,8 @@ data class CallRoom(
     val guestAudioMuted: Boolean = false,
     val hostCameraFacing: String = "front",
     val guestCameraFacing: String = "front",
-    @ServerTimestamp val createdAt: Timestamp? = null,
-    @ServerTimestamp val updatedAt: Timestamp? = null
+    val createdAt: JimmyTimestamp? = null,
+    val updatedAt: JimmyTimestamp? = null
 ) {
     fun isHost(uid: String): Boolean = hostId == uid
 
@@ -143,25 +156,23 @@ data class CallRoom(
         if (hostId == myUid) guestCameraFacing else hostCameraFacing
 }
 
-@IgnoreExtraProperties
 data class ChatMessage(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val roomId: String = "",
     val senderId: String = "",
     val senderName: String = "",
     val text: String = "",
     val participants: List<String> = emptyList(),
-    @ServerTimestamp val createdAt: Timestamp? = null
+    val createdAt: JimmyTimestamp? = null
 )
 
-@IgnoreExtraProperties
 data class ModerationAction(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val userId: String = "",
     val targetUserId: String = "",
     val targetCountryCode: String = "ALL",
     val actionType: String = "report",
     val reason: String = "",
     val roomId: String = "",
-    @ServerTimestamp val createdAt: Timestamp? = null
+    val createdAt: JimmyTimestamp? = null
 )

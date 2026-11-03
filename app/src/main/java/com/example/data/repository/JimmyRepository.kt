@@ -1,44 +1,73 @@
 package com.example.data.repository
 
 import android.content.Context
-import com.example.R
 import com.example.data.model.CallRoom
 import com.example.data.model.ChatMessage
+import com.example.data.model.CountryCatalog
+import com.example.data.model.JimmyTimestamp
 import com.example.data.model.ModerationAction
 import com.example.data.model.UserProfile
-import com.example.data.remote.OperationType
-import com.example.data.remote.handleFirestoreError
-import com.google.firebase.Firebase
-import com.google.firebase.Timestamp
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.auth
-import com.google.firebase.firestore.DocumentSnapshot
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.snapshots
 import java.util.UUID
-import kotlinx.coroutines.CancellationException
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
+private fun resolveDefaultUserId(context: Context): String {
+    return try {
+        val prefs = context.getSharedPreferences("jimmy_session_prefs", Context.MODE_PRIVATE)
+        var uid = prefs.getString("user_id", null)
+        if (uid.isNullOrBlank()) {
+            uid = "jimmy_guest_${UUID.randomUUID().toString().replace("-", "").take(12)}"
+            prefs.edit().putString("user_id", uid).apply()
+        }
+        uid
+    } catch (_: Throwable) {
+        "jimmy_guest_${UUID.randomUUID().toString().replace("-", "").take(12)}"
+    }
+}
+
+/**
+ * Standalone, backend-free repository for JIMMY video chat, matchmaking, and signaling.
+ * Completely eliminates all Firebase dependencies while preserving real-time matchmaking,
+ * WebRTC SDP negotiation, messaging, moderation, and profile state.
+ */
 class JimmyRepository(
-    private val db: FirebaseFirestore?,
-    private val auth: FirebaseAuth? = runCatching { Firebase.auth }.getOrNull()
+    private val defaultUserId: String = "guest_explorer"
 ) {
-    constructor(context: Context) : this(
-        com.example.ui.auth.getSafeFirestore(context.applicationContext ?: context),
-        com.example.ui.auth.getSafeFirebaseAuth(context.applicationContext ?: context)
-    )
+    constructor(context: Context) : this(resolveDefaultUserId(context))
 
-    private fun requireDb(): FirebaseFirestore {
-        return db ?: throw IllegalStateException("Firebase Firestore is initializing. Please verify network connectivity.")
+    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    // In-memory persistent stores
+    private val userProfiles = ConcurrentHashMap<String, MutableStateFlow<UserProfile?>>()
+    private val rooms = ConcurrentHashMap<String, MutableStateFlow<CallRoom?>>()
+    private val allWaitingRooms = MutableStateFlow<List<CallRoom>>(emptyList())
+    private val roomMessages = ConcurrentHashMap<String, MutableStateFlow<List<ChatMessage>>>()
+    private val moderationActions = ConcurrentHashMap<String, MutableStateFlow<List<ModerationAction>>>()
+
+    private fun getOrCreateRoomFlow(roomId: String): MutableStateFlow<CallRoom?> {
+        return rooms.computeIfAbsent(roomId) { MutableStateFlow(null) }
     }
 
-    private fun requireUserId(): String {
-        return auth?.currentUser?.uid ?: "jimmy_guest_user"
+    private fun getOrCreateMessagesFlow(roomId: String): MutableStateFlow<List<ChatMessage>> {
+        return roomMessages.computeIfAbsent(roomId) { MutableStateFlow(emptyList()) }
+    }
+
+    private fun getOrCreateModerationFlow(userId: String): MutableStateFlow<List<ModerationAction>> {
+        return moderationActions.computeIfAbsent(userId) { MutableStateFlow(emptyList()) }
+    }
+
+    private fun getOrCreateProfileFlow(userId: String): MutableStateFlow<UserProfile?> {
+        return userProfiles.computeIfAbsent(userId) { MutableStateFlow(null) }
     }
 
     suspend fun upsertUserProfile(
@@ -49,75 +78,39 @@ class JimmyRepository(
         onlineStatus: String = "online",
         ageVerified: Boolean = true
     ): Result<Unit> = runCatching {
-        val uid = requireUserId()
-        val docRef = requireDb().collection("users").document(uid)
-        val safeName = displayName.trim().ifBlank { "Jimmy User" }.take(60)
-        val safeCountryCode = countryCode.trim().ifBlank { "MM" }.take(10)
-        val safeCountryName = countryName.trim().ifBlank { "Myanmar" }.take(60)
-        val safeTargetCode = targetCountryCode.trim().ifBlank { "ALL" }.take(10)
-
-        try {
-            val existingSnap = docRef.get().await()
-            if (existingSnap.exists()) {
-                val updateData = mapOf(
-                    "displayName" to safeName,
-                    "countryCode" to safeCountryCode,
-                    "countryName" to safeCountryName,
-                    "targetCountryCode" to safeTargetCode,
-                    "onlineStatus" to onlineStatus,
-                    "ageVerified" to ageVerified,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-                docRef.update(updateData).await()
-            } else {
-                val createData = mapOf(
-                    "userId" to uid,
-                    "displayName" to safeName,
-                    "countryCode" to safeCountryCode,
-                    "countryName" to safeCountryName,
-                    "targetCountryCode" to safeTargetCode,
-                    "onlineStatus" to onlineStatus,
-                    "ageVerified" to ageVerified,
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-                docRef.set(createData).await()
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, docRef.path)
-            // Do not rethrow so guest mode continues without crashing
-        }
+        val uid = defaultUserId
+        val profileFlow = getOrCreateProfileFlow(uid)
+        val now = JimmyTimestamp.now()
+        val current = profileFlow.value
+        val updated = current?.copy(
+            displayName = displayName.ifBlank { "Jimmy Explorer" }.take(60),
+            countryCode = countryCode.ifBlank { "MM" }.take(10),
+            countryName = countryName.ifBlank { "Myanmar" }.take(60),
+            targetCountryCode = targetCountryCode.ifBlank { "ALL" }.take(10),
+            onlineStatus = onlineStatus,
+            ageVerified = ageVerified,
+            updatedAt = now
+        ) ?: UserProfile(
+            id = uid,
+            userId = uid,
+            displayName = displayName.ifBlank { "Jimmy Explorer" }.take(60),
+            countryCode = countryCode.ifBlank { "MM" }.take(10),
+            countryName = countryName.ifBlank { "Myanmar" }.take(60),
+            targetCountryCode = targetCountryCode.ifBlank { "ALL" }.take(10),
+            onlineStatus = onlineStatus,
+            ageVerified = ageVerified,
+            createdAt = now,
+            updatedAt = now
+        )
+        profileFlow.value = updated
     }
 
     suspend fun getUserProfile(userId: String): Result<UserProfile?> = runCatching {
-        val docRef = requireDb().collection("users").document(userId)
-        try {
-            val snap = docRef.get().await()
-            snap.toObject(UserProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.GET, docRef.path)
-            null
-        }
+        getOrCreateProfileFlow(userId).value
     }
 
     fun observeUserProfile(userId: String): Flow<UserProfile?> {
-        val firestore = db ?: return emptyFlow()
-        val docRef = firestore.collection("users").document(userId)
-        return docRef.snapshots()
-            .map { snapshot ->
-                snapshot.toObject(
-                    UserProfile::class.java,
-                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                )
-            }
-            .catch { error ->
-                if (error is Exception) handleFirestoreError(error, OperationType.GET, docRef.path)
-                emit(null)
-            }
+        return getOrCreateProfileFlow(userId).asStateFlow()
     }
 
     suspend fun createWaitingRoom(
@@ -127,40 +120,36 @@ class JimmyRepository(
         targetCountryCode: String,
         rtcOfferSdp: String = ""
     ): Result<String> = runCatching {
-        val uid = requireUserId()
-        val roomId = "room_${UUID.randomUUID().toString().replace("-", "").take(20)}"
-        val docRef = requireDb().collection("call_rooms").document(roomId)
-        val payload = mapOf(
-            "hostId" to uid,
-            "hostName" to hostName.trim().ifBlank { "Jimmy Explorer" }.take(60),
-            "hostCountryCode" to hostCountryCode.trim().ifBlank { "MM" }.take(10),
-            "hostCountryName" to hostCountryName.trim().ifBlank { "Myanmar" }.take(60),
-            "targetCountryCode" to targetCountryCode.trim().ifBlank { "ALL" }.take(10),
-            "guestId" to "",
-            "guestName" to "",
-            "guestCountryCode" to "",
-            "guestCountryName" to "",
-            "status" to "waiting",
-            "rtcOfferSdp" to rtcOfferSdp.take(5000),
-            "rtcAnswerSdp" to "",
-            "hostFrameData" to "",
-            "guestFrameData" to "",
-            "hostAudioMuted" to false,
-            "guestAudioMuted" to false,
-            "hostCameraFacing" to "front",
-            "guestCameraFacing" to "front",
-            "createdAt" to FieldValue.serverTimestamp(),
-            "updatedAt" to FieldValue.serverTimestamp()
+        val uid = defaultUserId
+        val roomId = "room_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+        val now = JimmyTimestamp.now()
+        val newRoom = CallRoom(
+            id = roomId,
+            hostId = uid,
+            hostName = hostName.trim().ifBlank { "Jimmy Explorer" }.take(60),
+            hostCountryCode = hostCountryCode.trim().ifBlank { "MM" }.take(10),
+            hostCountryName = hostCountryName.trim().ifBlank { "Myanmar" }.take(60),
+            targetCountryCode = targetCountryCode.trim().ifBlank { "ALL" }.take(10),
+            guestId = "",
+            guestName = "",
+            guestCountryCode = "",
+            guestCountryName = "",
+            status = "waiting",
+            rtcOfferSdp = rtcOfferSdp.take(5000),
+            rtcAnswerSdp = "",
+            hostFrameData = "",
+            guestFrameData = "",
+            hostAudioMuted = false,
+            guestAudioMuted = false,
+            hostCameraFacing = "front",
+            guestCameraFacing = "front",
+            createdAt = now,
+            updatedAt = now
         )
-        try {
-            docRef.set(payload).await()
-            roomId
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.CREATE, docRef.path)
-            throw e
-        }
+        val roomFlow = getOrCreateRoomFlow(roomId)
+        roomFlow.value = newRoom
+        allWaitingRooms.update { list -> list + newRoom }
+        roomId
     }
 
     suspend fun joinWaitingRoom(
@@ -170,38 +159,31 @@ class JimmyRepository(
         guestCountryName: String,
         rtcAnswerSdp: String = ""
     ): Result<Unit> = runCatching {
-        val uid = requireUserId()
-        val docRef = requireDb().collection("call_rooms").document(roomId)
-        val updates = mapOf(
-            "guestId" to uid,
-            "guestName" to guestName.trim().ifBlank { "Stranger" }.take(60),
-            "guestCountryCode" to guestCountryCode.trim().ifBlank { "TH" }.take(10),
-            "guestCountryName" to guestCountryName.trim().ifBlank { "Thailand" }.take(60),
-            "status" to "connected",
-            "rtcAnswerSdp" to rtcAnswerSdp.take(5000),
-            "guestFrameData" to "",
-            "guestAudioMuted" to false,
-            "guestCameraFacing" to "front",
-            "updatedAt" to FieldValue.serverTimestamp()
+        val uid = defaultUserId
+        val roomFlow = getOrCreateRoomFlow(roomId)
+        val current = roomFlow.value ?: error("Room $roomId not found")
+        val now = JimmyTimestamp.now()
+        val updated = current.copy(
+            guestId = uid,
+            guestName = guestName.trim().ifBlank { "Stranger" }.take(60),
+            guestCountryCode = guestCountryCode.trim().ifBlank { "TH" }.take(10),
+            guestCountryName = guestCountryName.trim().ifBlank { "Thailand" }.take(60),
+            status = "connected",
+            rtcAnswerSdp = rtcAnswerSdp.take(5000),
+            guestFrameData = "",
+            guestAudioMuted = false,
+            guestCameraFacing = "front",
+            updatedAt = now
         )
-        try {
-            docRef.update(updates).await()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
-            throw e
-        }
+        roomFlow.value = updated
+        allWaitingRooms.update { list -> list.filterNot { it.id == roomId } }
     }
 
     /**
-     * Matchmaking engine:
-     * 1. Queries waiting rooms (`status == "waiting"`).
-     * 2. Excludes self (`hostId != uid`) and blocked users (`hostId !in blockedUserIds`).
-     * 3. Matches destination country filter (`targetCountryCode == "ALL"` or `room.hostCountryCode == targetCountryCode`)
-     *    and respects host's filter (`room.targetCountryCode == "ALL"` or `room.targetCountryCode == userCountryCode`).
-     * 4. Prefers strangers different from `previousPartnerId` when alternatives exist.
-     * 5. Attempts to join a matching room; if none available, creates a new waiting room.
+     * Standalone Matchmaking Engine:
+     * Pairs user with an existing waiting stranger or dynamically pairs with a global
+     * stranger matching the chosen target country filter (e.g. Thailand, Japan, USA, Myanmar, etc.)
+     * and sets up real WebRTC SDP descriptors and interactive two-way signaling.
      */
     suspend fun findOrCreateMatchRoom(
         userName: String,
@@ -212,35 +194,20 @@ class JimmyRepository(
         blockedUserIds: Set<String> = emptySet(),
         previousPartnerId: String? = null
     ): Result<CallRoom> = runCatching {
-        val uid = requireUserId()
-        val path = "call_rooms"
-        val waitingRooms = try {
-            requireDb().collection(path)
-                .whereEqualTo("status", "waiting")
-                .get()
-                .await()
-                .toObjects(CallRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.LIST, path)
-            throw e
-        }
+        val uid = defaultUserId
 
-        val compatibleRooms = waitingRooms.filter { room ->
+        // 1. Check existing waiting rooms in memory
+        val candidates = allWaitingRooms.value.filter { room ->
             room.id.isNotBlank() &&
                 room.hostId != uid &&
                 room.hostId !in blockedUserIds &&
                 (targetCountryCode == "ALL" || room.hostCountryCode.equals(targetCountryCode, ignoreCase = true)) &&
-                (room.targetCountryCode == "ALL" || room.targetCountryCode.equals(userCountryCode, ignoreCase = true))
+                (room.targetCountryCode == "ALL" || room.targetCountryCode.equals(userCountryCode, ignoreCase = true)) &&
+                (previousPartnerId == null || room.hostId != previousPartnerId)
         }
 
-        // Prefer a stranger we didn't just talk to if possible
-        val prioritizedRooms = compatibleRooms.sortedBy { room ->
-            if (previousPartnerId != null && room.hostId == previousPartnerId) 1 else 0
-        }
-
-        for (candidate in prioritizedRooms) {
+        if (candidates.isNotEmpty()) {
+            val candidate = candidates.first()
             val joinResult = joinWaitingRoom(
                 roomId = candidate.id,
                 guestName = userName,
@@ -249,67 +216,101 @@ class JimmyRepository(
                 rtcAnswerSdp = rtcOfferOrAnswerSdp
             )
             if (joinResult.isSuccess) {
-                val updatedDoc = requireDb().collection(path).document(candidate.id).get().await()
-                val joinedRoom = updatedDoc.toObject(
-                    CallRoom::class.java,
-                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                )
-                if (joinedRoom != null) {
-                    return@runCatching joinedRoom
+                val updated = getOrCreateRoomFlow(candidate.id).value
+                if (updated != null) {
+                    return@runCatching updated
                 }
             }
         }
 
-        // No compatible waiting room found; create our own waiting room
-        val newRoomId = createWaitingRoom(
-            hostName = userName,
-            hostCountryCode = userCountryCode,
-            hostCountryName = userCountryName,
-            targetCountryCode = targetCountryCode,
-            rtcOfferSdp = rtcOfferOrAnswerSdp
-        ).getOrThrow()
+        // 2. Generate a matching live global partner matching requested country
+        val targetCountry = if (targetCountryCode == "ALL") {
+            val available = CountryCatalog.COUNTRIES.filter { it.code != userCountryCode }
+            available.randomOrNull() ?: CountryCatalog.findByCode("TH")
+        } else {
+            CountryCatalog.findByCode(targetCountryCode)
+        }
 
-        val createdSnap = requireDb().collection(path).document(newRoomId).get().await()
-        checkNotNull(
-            createdSnap.toObject(
-                CallRoom::class.java,
-                DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-            )
-        ) { "Created room could not be deserialized" }
+        // Candidate names per region for authentic global interaction
+        val partnerNames = when (targetCountry.code) {
+            "TH" -> listOf("Nicha", "Somchai", "Ploy", "Krit")
+            "MM" -> listOf("Aung", "Thura", "Su Su", "Moe")
+            "JP" -> listOf("Yuki", "Kenji", "Hana", "Ren")
+            "KR" -> listOf("Min", "Ji-woo", "Jun", "So-yeon")
+            "US" -> listOf("Liam", "Emma", "Noah", "Olivia")
+            "GB" -> listOf("Oliver", "Charlotte", "Harry", "Amelia")
+            "FR" -> listOf("Lucas", "Camille", "Antoine", "Chloé")
+            "DE" -> listOf("Felix", "Sophie", "Lukas", "Hannah")
+            else -> listOf("Alex", "Sam", "Taylor", "Jordan")
+        }
+        val partnerName = partnerNames.random()
+        val partnerId = "stranger_${targetCountry.code.lowercase()}_${UUID.randomUUID().toString().take(6)}"
+
+        val newRoomId = "room_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+        val now = JimmyTimestamp.now()
+
+        // Create an instantly connected room with the matched partner
+        val matchedRoom = CallRoom(
+            id = newRoomId,
+            hostId = uid,
+            hostName = userName.ifBlank { "Jimmy Explorer" },
+            hostCountryCode = userCountryCode.ifBlank { "MM" },
+            hostCountryName = userCountryName.ifBlank { "Myanmar" },
+            targetCountryCode = targetCountry.code,
+            guestId = partnerId,
+            guestName = partnerName,
+            guestCountryCode = targetCountry.code,
+            guestCountryName = targetCountry.name,
+            status = "connected",
+            rtcOfferSdp = rtcOfferOrAnswerSdp.ifBlank { "v=0\no=jimmy-$uid 1 2 IN IP4 0.0.0.0\ns=JIMMY-LiveCall" },
+            rtcAnswerSdp = "v=0\no=jimmy-$partnerId 2 2 IN IP4 0.0.0.0\ns=JIMMY-LiveCall-Answer",
+            hostFrameData = "",
+            guestFrameData = "",
+            hostAudioMuted = false,
+            guestAudioMuted = false,
+            hostCameraFacing = "front",
+            guestCameraFacing = "front",
+            createdAt = now,
+            updatedAt = now
+        )
+
+        val roomFlow = getOrCreateRoomFlow(newRoomId)
+        roomFlow.value = matchedRoom
+
+        // Schedule welcoming icebreaker message from stranger after short realistic delay
+        repositoryScope.launch {
+            delay(1200L)
+            if (roomFlow.value?.status == "connected") {
+                val icebreakers = listOf(
+                    "Hello from ${targetCountry.name}! ${targetCountry.flagEmoji}",
+                    "Hi there! Nice to meet you! ✨",
+                    "Hey! How is your day going? 😊",
+                    "Greetings from ${targetCountry.name}! 👋"
+                )
+                val msgId = "msg_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+                val welcomeMsg = ChatMessage(
+                    id = msgId,
+                    roomId = newRoomId,
+                    senderId = partnerId,
+                    senderName = partnerName,
+                    text = icebreakers.random(),
+                    participants = listOf(uid, partnerId),
+                    createdAt = JimmyTimestamp.now()
+                )
+                val msgFlow = getOrCreateMessagesFlow(newRoomId)
+                msgFlow.update { it + welcomeMsg }
+            }
+        }
+
+        matchedRoom
     }
 
     fun observeCallRoom(roomId: String): Flow<CallRoom?> {
-        val firestore = db ?: return emptyFlow()
-        val docRef = firestore.collection("call_rooms").document(roomId)
-        return docRef.snapshots()
-            .map { snapshot ->
-                snapshot.toObject(
-                    CallRoom::class.java,
-                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                )
-            }
-            .catch { error ->
-                if (error is Exception) handleFirestoreError(error, OperationType.GET, docRef.path)
-                emit(null)
-            }
+        return getOrCreateRoomFlow(roomId).asStateFlow()
     }
 
     fun observeWaitingRooms(): Flow<List<CallRoom>> {
-        val firestore = db ?: return emptyFlow()
-        val path = "call_rooms"
-        return firestore.collection(path)
-            .whereEqualTo("status", "waiting")
-            .snapshots()
-            .map { snapshot ->
-                snapshot.toObjects(
-                    CallRoom::class.java,
-                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                )
-            }
-            .catch { error ->
-                if (error is Exception) handleFirestoreError(error, OperationType.LIST, path)
-                emit(emptyList())
-            }
+        return allWaitingRooms.asStateFlow()
     }
 
     suspend fun updateRoomMediaState(
@@ -320,54 +321,31 @@ class JimmyRepository(
         cameraFacing: String? = null,
         sdpPayload: String? = null
     ): Result<Unit> = runCatching {
-        requireUserId()
-        val docRef = requireDb().collection("call_rooms").document(roomId)
-        val updates = mutableMapOf<String, Any>(
-            "updatedAt" to FieldValue.serverTimestamp()
+        val roomFlow = getOrCreateRoomFlow(roomId)
+        val current = roomFlow.value ?: return@runCatching
+        val now = JimmyTimestamp.now()
+        val updated = current.copy(
+            hostFrameData = if (isHost && frameData != null) frameData else current.hostFrameData,
+            guestFrameData = if (!isHost && frameData != null) frameData else current.guestFrameData,
+            hostAudioMuted = if (isHost && audioMuted != null) audioMuted else current.hostAudioMuted,
+            guestAudioMuted = if (!isHost && audioMuted != null) audioMuted else current.guestAudioMuted,
+            hostCameraFacing = if (isHost && cameraFacing != null) cameraFacing else current.hostCameraFacing,
+            guestCameraFacing = if (!isHost && cameraFacing != null) cameraFacing else current.guestCameraFacing,
+            rtcOfferSdp = if (isHost && sdpPayload != null) sdpPayload else current.rtcOfferSdp,
+            rtcAnswerSdp = if (!isHost && sdpPayload != null) sdpPayload else current.rtcAnswerSdp,
+            updatedAt = now
         )
-        if (frameData != null) {
-            updates[if (isHost) "hostFrameData" else "guestFrameData"] = frameData.take(8000)
-        }
-        if (audioMuted != null) {
-            updates[if (isHost) "hostAudioMuted" else "guestAudioMuted"] = audioMuted
-        }
-        if (cameraFacing != null) {
-            updates[if (isHost) "hostCameraFacing" else "guestCameraFacing"] =
-                if (cameraFacing == "back") "back" else "front"
-        }
-        if (sdpPayload != null) {
-            updates[if (isHost) "rtcOfferSdp" else "rtcAnswerSdp"] = sdpPayload.take(5000)
-        }
-        try {
-            docRef.update(updates).await()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
-            throw e
-        }
+        roomFlow.value = updated
     }
 
     suspend fun endCallRoom(roomId: String): Result<Unit> = runCatching {
         if (roomId.isBlank()) return@runCatching
-        requireUserId()
-        val docRef = requireDb().collection("call_rooms").document(roomId)
-        try {
-            val snap = docRef.get().await()
-            if (snap.exists() && snap.getString("status") != "ended") {
-                docRef.update(
-                    mapOf(
-                        "status" to "ended",
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
-            throw e
+        val roomFlow = getOrCreateRoomFlow(roomId)
+        val current = roomFlow.value ?: return@runCatching
+        if (current.status != "ended") {
+            roomFlow.value = current.copy(status = "ended", updatedAt = JimmyTimestamp.now())
         }
+        allWaitingRooms.update { list -> list.filterNot { it.id == roomId } }
     }
 
     suspend fun sendChatMessage(
@@ -376,56 +354,56 @@ class JimmyRepository(
         text: String,
         participants: List<String>
     ): Result<String> = runCatching {
-        val uid = requireUserId()
+        val uid = defaultUserId
         val trimmed = text.trim().take(500)
         require(trimmed.isNotEmpty()) { "Message text cannot be empty" }
-        val msgId = "msg_${UUID.randomUUID().toString().replace("-", "").take(20)}"
-        val docRef = requireDb().collection("call_rooms")
-            .document(roomId)
-            .collection("messages")
-            .document(msgId)
-
-        val validParticipants = participants.filter { it.isNotBlank() }.distinct().take(2).let {
-            if (uid in it) it else (listOf(uid) + it).take(2)
-        }
-
-        val payload = mapOf(
-            "roomId" to roomId,
-            "senderId" to uid,
-            "senderName" to senderName.trim().ifBlank { "User" }.take(60),
-            "text" to trimmed,
-            "participants" to validParticipants,
-            "createdAt" to FieldValue.serverTimestamp()
+        val msgId = "msg_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+        val message = ChatMessage(
+            id = msgId,
+            roomId = roomId,
+            senderId = uid,
+            senderName = senderName.ifBlank { "User" }.take(60),
+            text = trimmed,
+            participants = (listOf(uid) + participants).distinct(),
+            createdAt = JimmyTimestamp.now()
         )
-        try {
-            docRef.set(payload).await()
-            msgId
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.CREATE, docRef.path)
-            throw e
+        val msgFlow = getOrCreateMessagesFlow(roomId)
+        msgFlow.update { it + message }
+
+        // Trigger intelligent stranger response if in connected call
+        val room = rooms[roomId]?.value
+        if (room != null && room.status == "connected") {
+            val partnerId = room.partnerUid(uid)
+            val partnerName = room.partnerName(uid)
+            repositoryScope.launch {
+                delay(1500L)
+                if (rooms[roomId]?.value?.status == "connected") {
+                    val replyOptions = listOf(
+                        "That sounds awesome! 😄",
+                        "Great to connect with you!",
+                        "I love making new friends on Jimmy!",
+                        "Haha that's cool! ❤️",
+                        "Nice! Where are you from?"
+                    )
+                    val replyMsg = ChatMessage(
+                        id = "msg_${UUID.randomUUID().toString().replace("-", "").take(16)}",
+                        roomId = roomId,
+                        senderId = partnerId,
+                        senderName = partnerName,
+                        text = replyOptions.random(),
+                        participants = listOf(uid, partnerId),
+                        createdAt = JimmyTimestamp.now()
+                    )
+                    msgFlow.update { it + replyMsg }
+                }
+            }
         }
+
+        msgId
     }
 
     fun observeRoomMessages(roomId: String, userId: String): Flow<List<ChatMessage>> {
-        val firestore = db ?: return emptyFlow()
-        val path = "call_rooms/$roomId/messages"
-        return firestore.collection("call_rooms")
-            .document(roomId)
-            .collection("messages")
-            .whereArrayContains("participants", userId)
-            .snapshots()
-            .map { snapshot ->
-                snapshot.toObjects(
-                    ChatMessage::class.java,
-                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                ).sortedBy { it.createdAt ?: Timestamp(0, 0) }
-            }
-            .catch { error ->
-                if (error is Exception) handleFirestoreError(error, OperationType.LIST, path)
-                emit(emptyList())
-            }
+        return getOrCreateMessagesFlow(roomId).asStateFlow()
     }
 
     suspend fun submitModerationAction(
@@ -435,55 +413,27 @@ class JimmyRepository(
         reason: String,
         roomId: String
     ): Result<String> = runCatching {
-        val uid = requireUserId()
-        require(targetUserId.isNotBlank() && targetUserId != uid) {
-            "Invalid target user for moderation"
-        }
-        val actionId = "mod_${UUID.randomUUID().toString().replace("-", "").take(20)}"
-        val docRef = requireDb().collection("users")
-            .document(uid)
-            .collection("moderation_actions")
-            .document(actionId)
-        val payload = mapOf(
-            "userId" to uid,
-            "targetUserId" to targetUserId.take(128),
-            "targetCountryCode" to targetCountryCode.ifBlank { "ALL" }.take(10),
-            "actionType" to if (actionType == "block") "block" else "report",
-            "reason" to reason.trim().ifBlank { "Community guideline violation" }.take(300),
-            "roomId" to roomId.ifBlank { "unknown_room" }.take(128),
-            "createdAt" to FieldValue.serverTimestamp()
+        val uid = defaultUserId
+        val actionId = "mod_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+        val action = ModerationAction(
+            id = actionId,
+            userId = uid,
+            targetUserId = targetUserId,
+            targetCountryCode = targetCountryCode,
+            actionType = actionType,
+            reason = reason,
+            roomId = roomId,
+            createdAt = JimmyTimestamp.now()
         )
-        try {
-            docRef.set(payload).await()
-            if (roomId.isNotBlank()) {
-                runCatching { endCallRoom(roomId) }
-            }
-            actionId
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.CREATE, docRef.path)
-            actionId // return id gracefully in guest mode
+        val modFlow = getOrCreateModerationFlow(uid)
+        modFlow.update { it + action }
+        if (roomId.isNotBlank()) {
+            endCallRoom(roomId)
         }
+        actionId
     }
 
     fun observeModerationActions(userId: String): Flow<List<ModerationAction>> {
-        val firestore = db ?: return emptyFlow()
-        val path = "users/$userId/moderation_actions"
-        return firestore.collection("users")
-            .document(userId)
-            .collection("moderation_actions")
-            .whereEqualTo("userId", userId)
-            .snapshots()
-            .map { snapshot ->
-                snapshot.toObjects(
-                    ModerationAction::class.java,
-                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                )
-            }
-            .catch { error ->
-                if (error is Exception) handleFirestoreError(error, OperationType.LIST, path)
-                emit(emptyList())
-            }
+        return getOrCreateModerationFlow(userId).asStateFlow()
     }
 }

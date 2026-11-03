@@ -73,8 +73,6 @@ jobs:
             sed -i 's/cameraLifecycle = ".*"/cameraLifecycle = "1.4.1"/' gradle/libs.versions.toml
             sed -i 's/cameraView = ".*"/cameraView = "1.4.1"/' gradle/libs.versions.toml
             sed -i 's/cameraCore = ".*"/cameraCore = "1.4.1"/' gradle/libs.versions.toml
-            sed -i 's/firebaseBom = ".*"/firebaseBom = "33.10.0"/' gradle/libs.versions.toml
-            sed -i 's/googleServices = ".*"/googleServices = "4.4.2"/' gradle/libs.versions.toml
             sed -i 's/compileSdk { version = release(36) { minorApiLevel = 1 } }/compileSdk = 35/' app/build.gradle.kts
             sed -i 's/targetSdk = .*/targetSdk = 35/' app/build.gradle.kts
 

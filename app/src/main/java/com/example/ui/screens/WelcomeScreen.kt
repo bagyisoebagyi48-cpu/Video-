@@ -71,13 +71,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.credentials.CredentialManager
 import kotlinx.coroutines.launch
 import com.example.R
 import com.example.data.model.CountryCatalog
 import com.example.data.model.CountryOption
-import com.example.ui.auth.onGoogleSignInClicked
-import com.example.ui.auth.signOutUser
+import com.example.ui.auth.GuestSessionManager
 import com.example.ui.components.AdMobBannerSlot
 import com.example.ui.components.GlowingGlobeVisual
 import com.example.ui.components.JimmyLogoHeader
@@ -129,12 +127,8 @@ fun WelcomeScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val credentialManager = remember(context) {
-        runCatching { CredentialManager.create(context) }.getOrNull()
-    }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    var isSigningIn by remember { mutableStateOf(false) }
     var pickerTarget by remember { mutableStateOf(CountryPickerTarget.NONE) }
     var legalSheet by remember { mutableStateOf(LegalSheetType.NONE) }
     var countrySearchQuery by rememberSaveable { mutableStateOf("") }
@@ -303,96 +297,37 @@ fun WelcomeScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Primary CTA: Google Sign-In Gate (when unauthenticated) OR Start Video Chat Button
-                    if (!isAuthenticated) {
-                        Button(
-                            onClick = {
-                                isSigningIn = true
-                                onGoogleSignInClicked(
-                                    context = context,
-                                    credentialManager = credentialManager,
-                                    onAuthSuccess = {
-                                        isSigningIn = false
-                                        onAuthSuccess()
-                                    },
-                                    onAuthError = { errMsg ->
-                                        isSigningIn = false
-                                        scope.launch { snackbarHostState.showSnackbar(errMsg) }
-                                    },
-                                    scope = scope,
-                                    onAuthCancelled = { isSigningIn = false }
+                    // Primary CTA: Start Video Chat Button (Zero sign-in barrier)
+                    Button(
+                        onClick = onStartVideoChat,
+                        shape = RoundedCornerShape(50),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.Transparent
+                        ),
+                        contentPadding = PaddingValues(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(58.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(JimmyOrangeLight, JimmyOrangeBright, JimmyOrangeDeep)
                                 )
-                            },
-                            enabled = !isSigningIn,
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color.Transparent
-                            ),
-                            contentPadding = PaddingValues(),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(58.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(
-                                    Brush.horizontalGradient(
-                                        colors = listOf(JimmyOrangeLight, JimmyOrangeBright, JimmyOrangeDeep)
-                                    )
-                                )
-                                .testTag("google_sign_in_button")
-                        ) {
-                            if (isSigningIn) {
-                                CircularProgressIndicator(
-                                    color = Color.White,
-                                    strokeWidth = 2.5.dp,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = stringResource(R.string.sign_in_with_google),
-                                    style = MaterialTheme.typography.titleLarge,
-                                    color = Color.White
-                                )
-                            }
-                        }
-                    } else {
-                        Button(
-                            onClick = onStartVideoChat,
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color.Transparent
-                            ),
-                            contentPadding = PaddingValues(),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(58.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(
-                                    Brush.horizontalGradient(
-                                        colors = listOf(JimmyOrangeLight, JimmyOrangeBright, JimmyOrangeDeep)
-                                    )
-                                )
-                                .testTag("start_video_chat_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(26.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = stringResource(R.string.start_video_chat),
-                                style = MaterialTheme.typography.titleLarge,
-                                color = Color.White
-                            )
-                        }
+                            .testTag("start_video_chat_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(26.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(R.string.start_video_chat),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = Color.White
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -472,21 +407,17 @@ fun WelcomeScreen(
                                 color = JimmyTextMuted
                             )
                         }
-                        if (isAuthenticated) {
+                        if (userDisplayName.isNotBlank()) {
                             Text(text = "•", color = JimmyTextMuted, fontSize = 12.sp)
                             TextButton(
                                 onClick = {
-                                    signOutUser(
-                                        context = context,
-                                        credentialManager = credentialManager,
-                                        onSignOutComplete = onSignOut,
-                                        scope = scope
-                                    )
+                                    GuestSessionManager.resetSession(context)
+                                    onSignOut()
                                 },
                                 modifier = Modifier.testTag("sign_out_button")
                             ) {
                                 Text(
-                                    text = "Sign Out ($userDisplayName)",
+                                    text = "Reset ID ($userDisplayName)",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = JimmyTextMuted,
                                     maxLines = 1,
@@ -676,9 +607,9 @@ fun WelcomeScreen(
                         )
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = "1. Minimal Data Collection: JIMMY stores only essential matchmaking state (authenticated session ID, country selection, online status, and active call room ID) in Firebase Firestore.\n\n" +
+                            text = "1. Minimal Data Collection: JIMMY stores only local matchmaking state (anonymous session ID, country selection, online status, and active call room ID) on your device.\n\n" +
                                 "2. Camera & Microphone Privacy: Hardware camera and microphone access are used exclusively while you are actively inside the Video Chat Screen and released immediately when you leave or background the app.\n\n" +
-                                "3. Stranger Isolation: Your private Google account email is never exposed to strangers in call rooms.",
+                                "3. Privacy First: No personal accounts, passwords, or emails are collected.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = JimmyTextSecondary
                         )
@@ -691,9 +622,9 @@ fun WelcomeScreen(
                         )
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = "• Firebase Backend: Provisioned with Enterprise Firestore (`users`, `call_rooms`, `call_rooms/{id}/messages`, `users/{id}/moderation_actions`) and Google Sign-In via Jetpack Credential Manager.\n\n" +
-                                "• Real-Time Video & Audio: Powered by CameraX hardware preview/frame analyzer + WebRTC SDP signaling over Firestore. Configure custom TURN servers or Agora App ID via `.env` / AI Studio Secrets (`WEBRTC_TURN_URL`, `AGORA_APP_ID`).\n\n" +
-                                "• AdMob Monetization: Configured with official Google Test Ad Unit IDs (`ADMOB_BANNER_AD_UNIT_ID`, `ADMOB_REWARDED_AD_UNIT_ID`) on non-call screens. See `/ARCHITECTURE_AND_SETUP.md` in project root for full deliverables.",
+                            text = "• Standalone Architecture: Powered by a clean, lightweight matchmaking engine and WebRTC SDP signaling without any external Firebase services.\n\n" +
+                                "• Real-Time Video & Audio: Powered by CameraX hardware preview/frame analyzer + WebRTC SDP signaling. Configure custom TURN servers or Agora App ID via `.env` / AI Studio Secrets (`WEBRTC_TURN_URL`, `AGORA_APP_ID`).\n\n" +
+                                "• AdMob Monetization: Configured with official Google Test Ad Unit IDs (`ADMOB_BANNER_AD_UNIT_ID`, `ADMOB_REWARDED_AD_UNIT_ID`) on non-call screens.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = JimmyTextSecondary
                         )
