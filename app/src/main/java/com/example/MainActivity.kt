@@ -1,6 +1,5 @@
 package com.example
 
-import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,7 +22,6 @@ import com.example.ui.auth.authStateFlow
 import com.example.ui.auth.ensureFirebaseInitialized
 import com.example.ui.auth.getSafeFirebaseAuth
 import com.example.ui.auth.getSafeFirestore
-import com.example.ui.screens.JimmyCrashRecoveryScreen
 import com.example.ui.screens.SplashScreen
 import com.example.ui.screens.VideoChatScreen
 import com.example.ui.screens.WelcomeScreen
@@ -37,31 +35,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         runCatching { ensureFirebaseInitialized(this) }
         runCatching { enableEdgeToEdge() }
-
-        val crashFromIntent = intent?.getStringExtra(JimmyApplication.EXTRA_CRASH_INFO)
-
         setContent {
             MyApplicationTheme {
-                if (crashFromIntent != null) {
-                    JimmyCrashRecoveryScreen(
-                        crashDetails = crashFromIntent,
-                        onRestart = {
-                            val prefs = getSharedPreferences(JimmyApplication.PREFS_CRASH, Context.MODE_PRIVATE)
-                            prefs.edit().remove(JimmyApplication.KEY_LAST_CRASH).commit()
-                            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-                            finishAffinity()
-                            if (launchIntent != null) {
-                                startActivity(launchIntent)
-                            }
-                        },
-                        onContinueGuest = {
-                            intent?.removeExtra(JimmyApplication.EXTRA_CRASH_INFO)
-                            recreate()
-                        }
-                    )
-                } else {
-                    JimmyAppRoot()
-                }
+                JimmyAppRoot()
             }
         }
     }

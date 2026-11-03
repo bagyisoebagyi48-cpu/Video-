@@ -9,31 +9,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.example.R
 
-val OutfitFontFamily = FontFamily(
-    Font(
-        resId = R.font.outfit,
-        weight = FontWeight.Normal,
-        loadingStrategy = FontLoadingStrategy.OptionalLocal
-    ),
-    Font(
-        resId = R.font.outfit,
-        weight = FontWeight.Bold,
-        loadingStrategy = FontLoadingStrategy.OptionalLocal
+val OutfitFontFamily: FontFamily = runCatching {
+    FontFamily(
+        Font(
+            resId = R.font.outfit,
+            weight = FontWeight.Normal,
+            loadingStrategy = FontLoadingStrategy.OptionalLocal
+        )
     )
-)
+}.getOrDefault(FontFamily.SansSerif)
 
-val PlusJakartaFontFamily = FontFamily(
-    Font(
-        resId = R.font.plus_jakarta_sans,
-        weight = FontWeight.Normal,
-        loadingStrategy = FontLoadingStrategy.OptionalLocal
-    ),
-    Font(
-        resId = R.font.plus_jakarta_sans,
-        weight = FontWeight.Bold,
-        loadingStrategy = FontLoadingStrategy.OptionalLocal
+val PlusJakartaFontFamily: FontFamily = runCatching {
+    FontFamily(
+        Font(
+            resId = R.font.plus_jakarta_sans,
+            weight = FontWeight.Normal,
+            loadingStrategy = FontLoadingStrategy.OptionalLocal
+        )
     )
-)
+}.getOrDefault(FontFamily.Default)
 
 val Typography = Typography(
     displayLarge = TextStyle(
